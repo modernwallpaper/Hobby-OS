@@ -12,7 +12,6 @@
 #include <panic/panic.hpp>
 #include <pic/pic.hpp>
 #include <ports/ports.hpp>
-#include <timers/hpet/hpet.hpp>
 
 namespace
 {
@@ -157,8 +156,6 @@ extern "C" void kmain(void)
 	interrupts::apic::init_all();
 
 	// HPET
-
-	timers::hpet::hpet.init();
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 	hcf();

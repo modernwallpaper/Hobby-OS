@@ -2,6 +2,7 @@
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
+#include <timers/hpet/hpet.hpp>
 
 namespace acpi
 {
@@ -44,7 +45,8 @@ sdt_header* ACPI::find_table(const char* signature)
 		    memory::phys_to_virt(this->rsdp_ptr->rsdt_address));
 		std::uint32_t count = (rsdt->length - sizeof(sdt_header)) / 4;
 		auto* entries = reinterpret_cast<std::uint32_t*>(
-		    reinterpret_cast<std::uintptr_t>(rsdt) + sizeof(sdt_header));
+		    reinterpret_cast<std::uintptr_t>(rsdt) +
+		    sizeof(sdt_header));
 
 		for (std::uint32_t i = 0; i < count; i++)
 		{
@@ -57,7 +59,8 @@ sdt_header* ACPI::find_table(const char* signature)
 	return nullptr;
 }
 
-// parse the RSDP and MADT, extracting LAPIC address, IOAPIC info, and x2APIC presence
+// parse the RSDP and MADT, extracting LAPIC address, IOAPIC info, and x2APIC
+// presence
 void ACPI::init(void* rsdp_addr)
 {
 	this->rsdp_ptr = static_cast<rsdp*>(rsdp_addr);
@@ -77,8 +80,7 @@ void ACPI::init(void* rsdp_addr)
 	    this->rsdp_ptr->oem_id);
 #endif
 
-	this->madt_table =
-	    reinterpret_cast<madt*>(this->find_table("APIC"));
+	this->madt_table = reinterpret_cast<madt*>(this->find_table("APIC"));
 	if (!this->madt_table)
 	{
 #ifdef DEBUG
@@ -96,13 +98,16 @@ void ACPI::init(void* rsdp_addr)
 		return;
 	}
 
+	auto* hpet_table = reinterpret_cast<struct timers::hpet::hpet*>(
+	    this->find_table("HPET"));
+	this->hpet_address = hpet_table->address.address;
+
 	this->lapic_address = this->madt_table->local_apic_address;
 	this->ioapic_address = 0;
 	this->x2apic_present = false;
 
 	std::uintptr_t entry_ptr =
-	    reinterpret_cast<std::uintptr_t>(this->madt_table) +
-	    sizeof(madt);
+	    reinterpret_cast<std::uintptr_t>(this->madt_table) + sizeof(madt);
 	std::uintptr_t end =
 	    reinterpret_cast<std::uintptr_t>(this->madt_table) +
 	    this->madt_table->header.length;
@@ -119,9 +124,8 @@ void ACPI::init(void* rsdp_addr)
 			this->ioapic_id = io->ioapic_id;
 			this->ioapic_gsi_base = io->gsi_base;
 #ifdef DEBUG
-			LOG("io_apic_id=%d; addr=0x%x; gsi=%u",
-			    this->ioapic_id, this->ioapic_address,
-			    this->ioapic_gsi_base);
+			LOG("io_apic_id=%d; addr=0x%x; gsi=%u", this->ioapic_id,
+			    this->ioapic_address, this->ioapic_gsi_base);
 #endif
 			break;
 		}
@@ -131,8 +135,7 @@ void ACPI::init(void* rsdp_addr)
 			this->lapic_address =
 			    static_cast<std::uint32_t>(ov->lapic_address);
 #ifdef DEBUG
-			LOG("lapic_address_override=0x%x",
-			    this->lapic_address);
+			LOG("lapic_address_override=0x%x", this->lapic_address);
 #endif
 			break;
 		}
