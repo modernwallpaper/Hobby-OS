@@ -1,0 +1,10 @@
+/limine-binary
+/edk2-ovmf-bins
+*.iso
+*.hdd
+*/**/*.log
+*/**/*.aux
+*/**/*.out
+*/**/*.toc
+journey/
+compile_commands.json
