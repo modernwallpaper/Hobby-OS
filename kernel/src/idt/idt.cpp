@@ -43,6 +43,7 @@ extern "C" void isr29(void);
 extern "C" void isr30(void);
 extern "C" void isr31(void);
 extern "C" void isr_unhandled(void);
+extern "C" void lapic_timer_stub(void);
 
 static void (*isr_table[32])(void) = {
     isr0,  isr1,  isr2,	 isr3,	isr4,  isr5,  isr6,  isr7,  isr8,  isr9,  isr10,
@@ -70,12 +71,17 @@ static void (*irq_table[16])(void) = {irq0,  irq1,  irq2,  irq3, irq4,	irq5,
 				      irq6,  irq7,  irq8,  irq9, irq10, irq11,
 				      irq12, irq13, irq14, irq15};
 
+void lapic_timer_handler(frame* frame)
+{
+	apic::apic.eoi();
+}
+
 // main interrupt handler: dispatch exceptions and IRQs
 extern "C" frame* isr_handler(frame* frame)
 {
-#ifdef DEBUG
-	LOG("vector=%x", frame->vector);
-#endif
+	// #ifdef DEBUG
+	// 	LOG("vector=%x", frame->vector);
+	// #endif
 	if (frame->vector == 0)
 	{
 		frame->rip += 2;
@@ -83,6 +89,10 @@ extern "C" frame* isr_handler(frame* frame)
 	else if (frame->vector >= 32 && frame->vector <= 47)
 	{
 		irq_handler(frame);
+	}
+	else if (frame->vector == 48)
+	{
+		lapic_timer_handler(frame);
 	}
 	else
 	{
@@ -97,10 +107,10 @@ extern "C" frame* isr_handler(frame* frame)
 // IRQ handler: send EOI to the APIC
 extern "C" void irq_handler(frame* frame)
 {
-#ifdef DEBUG
-	std::uint8_t irq = frame->vector - 32;
-	LOG("irq=%x", irq);
-#endif
+	// #ifdef DEBUG
+	// 	std::uint8_t irq = frame->vector - 32;
+	// 	LOG("irq=%x", irq);
+	// #endif
 	apic::apic.eoi();
 }
 
@@ -115,7 +125,16 @@ void IDT::init(void)
 		this->set_gate(32 + i, reinterpret_cast<void*>(irq_table[i]));
 
 	for (int i = 48; i < 256; ++i)
-		this->set_gate(i, reinterpret_cast<void*>(isr_unhandled));
+	{
+		if (i == 48)
+			this->set_gate(
+			    i, reinterpret_cast<void*>(lapic_timer_stub));
+		else
+		{
+			this->set_gate(i,
+				       reinterpret_cast<void*>(isr_unhandled));
+		}
+	}
 
 	this->set_ist(1, 1);
 	this->set_ist(2, 2);

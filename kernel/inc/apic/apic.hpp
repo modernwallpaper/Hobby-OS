@@ -11,12 +11,13 @@ namespace apic
 class APIC {
 private:
 	enum class Mode : std::uint8_t {
-		XAPIC  = 0,
+		XAPIC = 0,
 		X2APIC = 1,
 	};
 
 	Mode mode;
 	volatile std::uint32_t* base;
+	std::uint64_t bus_frequency;
 
 	static constexpr std::uint64_t MSR_APIC_BASE = 0x1B;
 
@@ -54,6 +55,17 @@ private:
 	static constexpr std::uint32_t LVT_TIMER_ONESHOT = 0;
 	static constexpr std::uint32_t LVT_TIMER_PERIODIC = 1 << 17;
 	static constexpr std::uint32_t LVT_TIMER_TSC_DEADLINE = 1 << 18;
+
+	static constexpr std::uint32_t TIMER_DIV_1 = 0xB;
+	static constexpr std::uint32_t TIMER_DIV_2 = 0x0;
+	static constexpr std::uint32_t TIMER_DIV_4 = 0x1;
+	static constexpr std::uint32_t TIMER_DIV_8 = 0x2;
+	static constexpr std::uint32_t TIMER_DIV_16 = 0x3;
+	static constexpr std::uint32_t TIMER_DIV_32 = 0x8;
+	static constexpr std::uint32_t TIMER_DIV_64 = 0x9;
+	static constexpr std::uint32_t TIMER_DIV_128 = 0xA;
+
+	static constexpr std::uint32_t CALIBRATION_DIVIDER = 16;
 
 	static constexpr std::uint32_t ICR_FIXED = 0;
 	static constexpr std::uint32_t ICR_LOWEST_PRIORITY = 1;
@@ -105,6 +117,11 @@ public:
 	void send_ipi_all(std::uint8_t vector, std::uint32_t delivery_mode);
 	void send_ipi_self(std::uint8_t vector, std::uint32_t delivery_mode);
 	void send_startup_ipi(std::uint8_t apic_id, std::uint8_t vector);
+
+	void timer_calibrate(void);
+	void timer_oneshot(std::uint32_t us, std::uint8_t vector);
+	void timer_periodic(std::uint32_t us, std::uint8_t vector);
+	std::uint64_t bus_freq(void);
 };
 
 extern APIC apic;

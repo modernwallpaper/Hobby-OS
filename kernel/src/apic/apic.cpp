@@ -5,6 +5,7 @@
 #include <memory/buddy.hpp>
 #include <memory/paging.hpp>
 #include <pic/pic.hpp>
+#include <timers/hpet/hpet.hpp>
 
 namespace interrupts
 {
@@ -14,7 +15,7 @@ namespace apic
 
 APIC apic;
 
-APIC::APIC() : mode(Mode::XAPIC), base(nullptr)
+APIC::APIC() : mode(Mode::XAPIC), base(nullptr), bus_frequency(0)
 {
 }
 
@@ -316,6 +317,73 @@ void APIC::send_startup_ipi(std::uint8_t apic_id, std::uint8_t vector)
 	}
 }
 
+// calibrate the LAPIC timer bus frequency using the HPET
+void APIC::timer_calibrate(void)
+{
+	std::uint64_t hpet_freq = timers::hpet::hpet.get_freq();
+	if (hpet_freq == 0)
+		return;
+
+	this->reg_write(this->REG_TIMER_DCR, this->TIMER_DIV_16);
+
+	this->reg_write(this->REG_TIMER_ICR, 0xFFFFFFFF);
+
+	std::uint64_t wait_ticks = hpet_freq / 100;
+	std::uint64_t start = timers::hpet::hpet.read_counter();
+	while (timers::hpet::hpet.read_counter() - start < wait_ticks)
+		__asm__ volatile("pause");
+
+	std::uint32_t remaining = this->reg_read(this->REG_TIMER_CCR);
+	std::uint32_t consumed = 0xFFFFFFFF - remaining;
+
+	this->bus_frequency = static_cast<std::uint64_t>(consumed) *
+			      this->CALIBRATION_DIVIDER * 100;
+
+	this->reg_write(this->REG_LVT_TIMER,
+			this->LVT_MASKED | this->LVT_TIMER_ONESHOT);
+
+#ifdef DEBUG
+	LOG("bus_frequency=%llu; consumed=%u", this->bus_frequency, consumed);
+#endif
+}
+
+// program the LAPIC timer in one-shot mode
+void APIC::timer_oneshot(std::uint32_t us, std::uint8_t vector)
+{
+	if (this->bus_frequency == 0)
+		return;
+
+	std::uint32_t count = static_cast<std::uint32_t>(
+	    (static_cast<std::uint64_t>(us) *
+	     (this->bus_frequency / this->CALIBRATION_DIVIDER)) /
+	    1000000);
+
+	this->reg_write(this->REG_TIMER_DCR, this->TIMER_DIV_16);
+	this->reg_write(this->REG_TIMER_ICR, count);
+	this->reg_write(this->REG_LVT_TIMER, vector | this->LVT_TIMER_ONESHOT);
+}
+
+void APIC::timer_periodic(std::uint32_t us, std::uint8_t vector)
+{
+	if (this->bus_frequency == 0)
+		return;
+
+	std::uint32_t count = static_cast<std::uint32_t>(
+	    (static_cast<std::uint64_t>(us) *
+	     (this->bus_frequency / this->CALIBRATION_DIVIDER)) /
+	    1000000);
+
+	this->reg_write(this->REG_TIMER_DCR, this->TIMER_DIV_16);
+	this->reg_write(this->REG_TIMER_ICR, count);
+	this->reg_write(this->REG_LVT_TIMER, vector | this->LVT_TIMER_PERIODIC);
+}
+
+// return the calibrated bus frequency
+std::uint64_t APIC::bus_freq(void)
+{
+	return this->bus_frequency;
+}
+
 // initialize the full interrupt subsystem: PIC, LAPIC, x2APIC, IOAPIC
 void init_all(void)
 {
@@ -333,6 +401,8 @@ void init_all(void)
 		ioapic_addr = 0xFEC00000;
 
 	interrupts::ioapic::ioapic.init(ioapic_addr);
+
+	apic.timer_calibrate();
 }
 
 } // namespace apic

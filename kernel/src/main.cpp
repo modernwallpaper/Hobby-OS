@@ -152,14 +152,17 @@ extern "C" void kmain(void)
 		acpi::acpi.init(rsdp_request.response->address);
 	}
 
+	// HPET (needed before LAPIC timer calibration)
+
+	timers::hpet::hpet.init();
+
 	// PIC/APIC
 
 	interrupts::apic::init_all();
 
-	// HPET
-
-	timers::hpet::hpet.init();
+	interrupts::apic::apic.timer_periodic(1000, 48);
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
+	asm("sti");
 	hcf();
 }

@@ -93,6 +93,12 @@ isr_unhandled:
     push 0xFF
     jmp isr_common
 
+global lapic_timer_stub
+lapic_timer_stub:
+    push 0
+    push 48
+    jmp isr_common
+
 ; Macro for hardware IRQ stubs (mapped to vectors 32-47)
 %macro irq_stub 1
 global irq%1

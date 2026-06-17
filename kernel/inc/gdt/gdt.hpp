@@ -59,8 +59,7 @@ private:
 public:
 	void init(std::uint64_t kernel_stack_size, std::uint8_t* kernel_stack,
 		  std::uint64_t ist_stack_size, std::uint8_t* ist1,
-		  std::uint8_t* ist2, std::uint8_t* ist3,
-		  std::uint8_t* ist4);
+		  std::uint8_t* ist2, std::uint8_t* ist3, std::uint8_t* ist4);
 	void set_gate(std::uint32_t num, std::uint32_t base,
 		      std::uint32_t limit, std::uint8_t access,
 		      std::uint8_t granularity);
