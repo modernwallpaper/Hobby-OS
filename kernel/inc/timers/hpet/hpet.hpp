@@ -29,6 +29,7 @@ struct description_table_header {
 } __attribute__((packed));
 
 struct hpet {
+	description_table_header header;
 	std::uint8_t hardware_rev_id;
 	std::uint8_t comparator_count : 5;
 	std::uint8_t counter_size : 1;

@@ -93,7 +93,7 @@ public:
 	std::uint32_t ioapic_address;
 	std::uint8_t ioapic_id;
 	std::uint32_t ioapic_gsi_base;
-	std::uint32_t hpet_address;
+	std::uint64_t hpet_address;
 	bool x2apic_present;
 
 	void init(void* rsdp_addr);
