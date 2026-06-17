@@ -1,10 +1,14 @@
-### Running
+## Project Base
 
-## Debuging
+This project was build on top of the limine-cxx-template.
+
+## Running
+
+### Debuging
 
 Just parse the DEBUG=1 argument after ```make run```
 
-## Command
+### Command
 
 i usually run it with this command, but you also have many other options.
 Just take a look into the `GNUMakefile`.
