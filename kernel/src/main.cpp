@@ -13,6 +13,7 @@
 #include <panic/panic.hpp>
 #include <pic/pic.hpp>
 #include <ports/ports.hpp>
+#include <smp/smp.hpp>
 
 namespace
 {
@@ -161,6 +162,11 @@ extern "C" void kmain(void)
 	interrupts::apic::init_all();
 
 	interrupts::apic::apic.timer_periodic(1000, 48);
+
+#ifdef DEBUG
+	LOG("waking_aps");
+#endif
+	smp::wake_aps();
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 	asm("sti");

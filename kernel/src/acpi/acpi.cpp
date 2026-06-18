@@ -107,6 +107,7 @@ void ACPI::init(void* rsdp_addr)
 	this->lapic_address = this->madt_table->local_apic_address;
 	this->ioapic_address = 0;
 	this->x2apic_present = false;
+	this->cpu_count = 0;
 
 	std::uintptr_t entry_ptr =
 	    reinterpret_cast<std::uintptr_t>(this->madt_table) + sizeof(madt);
@@ -120,6 +121,24 @@ void ACPI::init(void* rsdp_addr)
 
 		switch (entry->type)
 		{
+		case MADT_LOCAL_APIC: {
+			auto* cpu =
+			    reinterpret_cast<madt_entry_local_apic*>(entry);
+			if (cpu->flags & 1 && this->cpu_count < MAX_CPU)
+			{
+				this->cpus[this->cpu_count].apic_id =
+				    cpu->apic_id;
+				this->cpus[this->cpu_count].bsp =
+				    (cpu->flags >> 1) & 1;
+				this->cpu_count++;
+#ifdef DEBUG
+				LOG("cpu_%d: apic_id=0x%x; flags=0x%x",
+				    this->cpu_count - 1, cpu->apic_id,
+				    cpu->flags);
+#endif
+			}
+			break;
+		}
 		case MADT_IO_APIC: {
 			auto* io = reinterpret_cast<madt_entry_io_apic*>(entry);
 			this->ioapic_address = io->ioapic_address;
@@ -156,9 +175,25 @@ void ACPI::init(void* rsdp_addr)
 			}
 			break;
 		}
-		case MADT_LOCAL_X2APIC:
+		case MADT_LOCAL_X2APIC: {
+			auto* x2 =
+			    reinterpret_cast<madt_entry_x2apic*>(entry);
 			this->x2apic_present = true;
+			if ((x2->flags & 1) && this->cpu_count < MAX_CPU)
+			{
+				this->cpus[this->cpu_count].apic_id =
+				    static_cast<std::uint8_t>(x2->x2apic_id);
+				this->cpus[this->cpu_count].bsp =
+				    (x2->flags >> 1) & 1;
+				this->cpu_count++;
+#ifdef DEBUG
+				LOG("x2cpu_%d: x2apic_id=0x%x; flags=0x%x",
+				    this->cpu_count - 1, x2->x2apic_id,
+				    x2->flags);
+#endif
+			}
 			break;
+		}
 		}
 
 		entry_ptr += entry->length;
@@ -166,6 +201,10 @@ void ACPI::init(void* rsdp_addr)
 
 	if (this->ioapic_address == 0)
 		this->ioapic_address = 0xFEC00000;
+
+#ifdef DEBUG
+	LOG("cpu_count=%d", this->cpu_count);
+#endif
 
 #ifdef DEBUG
 	LOG("lapic=0x%x; ioapic=0x%x; x2apic=%s", this->lapic_address,

@@ -69,6 +69,10 @@ public:
 	{
 		return &this->tss;
 	}
+	struct ptr* get_gdt_ptr()
+	{
+		return &this->gdt_ptr;
+	}
 };
 
 extern GDT gdt;

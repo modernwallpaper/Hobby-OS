@@ -91,7 +91,7 @@ std::uint32_t APIC::reg_read(std::uint32_t offset)
 // initialize the local APIC: enable, map MMIO, program SVR/TPR/LVT
 void APIC::init(std::uint32_t lapic_phys_addr)
 {
-	std::uint64_t apic_base_msr = this->rdmsr(MSR_APIC_BASE);
+	std::uint64_t apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
 #ifdef DEBUG
 	LOG("IA32_APIC_BASE=0x%016llx", apic_base_msr);
 #endif
@@ -102,7 +102,7 @@ void APIC::init(std::uint32_t lapic_phys_addr)
 		LOG("lapic_disabled_in_msr; enabling");
 #endif
 		apic_base_msr |= (1 << 11);
-		this->wrmsr(MSR_APIC_BASE, apic_base_msr);
+		this->wrmsr(this->MSR_APIC_BASE, apic_base_msr);
 	}
 
 	// If the MSR reports a different address than our caller,
@@ -130,17 +130,17 @@ void APIC::init(std::uint32_t lapic_phys_addr)
 #endif
 
 	// Software Enable (SVR), vector 0xFF for spurious
-	this->reg_write(REG_SVR, 0xFF | SVR_ENABLE);
+	this->reg_write(this->REG_SVR, 0xFF | this->SVR_ENABLE);
 #ifdef DEBUG
-	LOG("svr=0x%08x", this->reg_read(REG_SVR));
+	LOG("svr=0x%08x", this->reg_read(this->REG_SVR));
 #endif
 
 	// Task Priority; accept all interrupts
-	this->reg_write(REG_TPR, 0);
+	this->reg_write(this->REG_TPR, 0);
 
 	// Logical Destination: flat model
-	this->reg_write(REG_DFR, 0xFFFFFFFF);
-	this->reg_write(REG_LDR, 0x01000000);
+	this->reg_write(this->REG_DFR, 0xFFFFFFFF);
+	this->reg_write(this->REG_LDR, 0x01000000);
 
 	// LVT entries
 	//   Timer:     masked, oneshot

@@ -88,6 +88,13 @@ struct __attribute__((packed)) madt_entry_int_override {
 	std::uint16_t flags;
 };
 
+static constexpr int MAX_CPU = 16;
+
+struct CpuInfo {
+	std::uint8_t apic_id;
+	bool bsp;
+};
+
 class ACPI {
 private:
 	rsdp* rsdp_ptr;
@@ -107,6 +114,8 @@ private:
 	bool validate_checksum(void* table, std::uint32_t length);
 	sdt_header* find_table(const char* signature);
 
+	void parse_cpu_entries(void);
+
 public:
 	std::uint32_t lapic_address;
 	std::uint32_t ioapic_address;
@@ -114,6 +123,9 @@ public:
 	std::uint32_t ioapic_gsi_base;
 	std::uint64_t hpet_address;
 	bool x2apic_present;
+
+	CpuInfo cpus[MAX_CPU];
+	int cpu_count;
 
 	void init(void* rsdp_addr);
 	std::uint32_t resolve_irq(std::uint8_t irq);
