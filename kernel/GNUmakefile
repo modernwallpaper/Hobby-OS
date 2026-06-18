@@ -174,7 +174,7 @@ override LDFLAGS += \
 # Use "find" to glob all *.c, *.cpp, *.S, and *.asm files in the tree
 # (except the src/arch/* directories, as those are gonna be added
 # in the next step).
-override SRCFILES := $(shell find -L src cc-runtime/src -type f -not -path 'src/arch/*' -not -name 'smp_trampoline.asm' 2>/dev/null | LC_ALL=C sort)
+override SRCFILES := $(shell find -L src cc-runtime/src -type f -not -path 'src/arch/*' 2>/dev/null | LC_ALL=C sort)
 # Add architecture specific files, if they exist.
 override SRCFILES += $(shell find -L src/arch/$(ARCH) -type f 2>/dev/null | LC_ALL=C sort)
 # Obtain the object and header dependencies file names.
@@ -189,12 +189,6 @@ ifeq ($(ARCH),x86_64)
 override OBJ += $(addprefix obj-$(ARCH)/,$(NASMFILES:.asm=.asm.o))
 endif
 override HEADER_DEPS := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.d) $(CXXFILES:.cpp=.cpp.d) $(ASFILES:.S=.S.d))
-
-# SMP trampoline object (built from flat binary)
-SMP_TRAMPOLINE_BIN := obj-$(ARCH)/smp_trampoline.bin
-SMP_TRAMPOLINE_OBJ := obj-$(ARCH)/smp_trampoline.o
-
-override OBJ += $(SMP_TRAMPOLINE_OBJ)
 
 # Default target. This must come first, before header dependencies.
 .PHONY: all
@@ -229,12 +223,6 @@ obj-$(ARCH)/%.asm.o: %.asm GNUmakefile $(DEBUG_STAMP)
 	mkdir -p "$(dir $@)"
 	nasm $(NASMFLAGS) $< -o $@
 endif
-
-# SMP trampoline: assemble as flat binary, then wrap in ELF for linking
-$(SMP_TRAMPOLINE_OBJ): src/smp/smp_trampoline.asm GNUmakefile $(DEBUG_STAMP)
-	mkdir -p obj-$(ARCH)
-	nasm -f bin -o $(SMP_TRAMPOLINE_BIN) $<
-	$(LD) -r -b binary -o $@ $(SMP_TRAMPOLINE_BIN)
 
 # Remove object files and the final executable.
 .PHONY: clean

@@ -42,6 +42,11 @@ __attribute__((
     section(".limine_requests"))) volatile limine_rsdp_request rsdp_request = {
     .id = LIMINE_RSDP_REQUEST_ID, .revision = 0, .response = nullptr};
 
+__attribute__((
+    used,
+    section(".limine_requests"))) volatile limine_mp_request mp_request = {
+    .id = LIMINE_MP_REQUEST_ID, .revision = 0, .response = nullptr, .flags = 0};
+
 } // namespace
 
 namespace
@@ -104,6 +109,8 @@ extern "C" void kmain(void)
 		PANIC("hhdm_request.response=nullptr");
 	if (rsdp_request.response == nullptr)
 		PANIC("rsdp_request.response=nullptr");
+	if (mp_request.response == nullptr)
+		PANIC("mp_request.response=nullptr");
 
 	// memory
 
@@ -166,7 +173,7 @@ extern "C" void kmain(void)
 #ifdef DEBUG
 	LOG("waking_aps");
 #endif
-	smp::wake_aps();
+	smp::wake_aps(mp_request.response);
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 	asm("sti");

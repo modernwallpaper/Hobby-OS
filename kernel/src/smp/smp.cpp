@@ -1,219 +1,190 @@
-#include <smp/smp.hpp>
 #include <acpi/acpi.hpp>
 #include <apic/apic.hpp>
 #include <gdt/gdt.hpp>
-#include <hpet/hpet.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
-#include <memory/paging.hpp>
+#include <smp/smp.hpp>
 
 namespace smp
 {
 
-extern "C" {
-extern char _binary_obj_x86_64_smp_trampoline_bin_start[];
-extern char _binary_obj_x86_64_smp_trampoline_bin_end[];
+cpu_info cpu_infos[MAX_CPUS];
+std::uint64_t cpu_count = 0;
+
+static gdt::entry ap_gdts[MAX_CPUS][7];
+static gdt::tss ap_tsss[MAX_CPUS] __attribute__((aligned(16)));
+
+static constexpr std::uint32_t MSR_GS_BASE = 0xC0000101;
+
+static void wrmsr(std::uint32_t msr, std::uint64_t value)
+{
+	std::uint32_t eax = value & 0xFFFFFFFF;
+	std::uint32_t edx = (value >> 32) & 0xFFFFFFFF;
+	asm volatile("wrmsr" : : "c"(msr), "a"(eax), "d"(edx));
 }
 
-// Offsets within the trampoline page — must match smp_trampoline.asm
-namespace info_offsets
+static void sse_enable(void)
 {
-static constexpr std::uintptr_t GDT_LIMIT = 0x02;
-static constexpr std::uintptr_t GDT_BASE = 0x04;
-static constexpr std::uintptr_t CR3 = 0x0C;
-static constexpr std::uintptr_t STACK_TOP = 0x14;
-static constexpr std::uintptr_t ENTRY_FN = 0x1C;
-static constexpr std::uintptr_t CPU_ID = 0x24;
-static constexpr std::uintptr_t GDTR = 0x28;
-static constexpr std::uintptr_t GDT_ENTRIES = 0x2E;
-} // namespace info_offsets
+	std::uint64_t cr0;
+	asm volatile("mov %%cr0, %0" : "=r"(cr0));
+	cr0 &= ~(1ULL << 2);
+	cr0 |= (1ULL << 1);
+	asm volatile("mov %0, %%cr0" : : "r"(cr0));
 
-// Read CR3
-static std::uint64_t read_cr3(void)
-{
-	std::uint64_t cr3;
-	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-	return cr3;
+	std::uint64_t cr4;
+	asm volatile("mov %%cr4, %0" : "=r"(cr4));
+	cr4 |= (1ULL << 9);
+	cr4 |= (1ULL << 10);
+	asm volatile("mov %0, %%cr4" : : "r"(cr4));
 }
 
-// Busy-wait for `us` microseconds using the HPET counter
-static void udelay(std::uint64_t us)
+static void ap_setup_gdt_tss(gdt::entry* gdt, gdt::tss* tss,
+			     std::uint64_t stack_top)
 {
-	std::uint64_t freq = timers::hpet::hpet.get_freq();
-	if (freq == 0)
-		return;
-	std::uint64_t ticks = freq * us / 1000000;
-	std::uint64_t start = timers::hpet::hpet.read_counter();
-	while (timers::hpet::hpet.read_counter() - start < ticks)
-		__asm__ volatile("pause");
+	memory::memset(gdt, 0, 7 * sizeof(gdt::entry));
+
+	gdt[1].access = 0x9A;
+	gdt[1].flags = 0x0A;
+	gdt[1].limit = 0x00;
+
+	gdt[2].access = 0x92;
+	gdt[2].flags = 0x0C;
+	gdt[2].limit = 0x00;
+
+	gdt[3].access = 0xFA;
+	gdt[3].flags = 0x0A;
+	gdt[3].limit = 0x00;
+
+	gdt[4].access = 0xF2;
+	gdt[4].flags = 0x0C;
+	gdt[4].limit = 0x00;
+
+	std::uint64_t tss_base = reinterpret_cast<std::uint64_t>(tss);
+	std::uint32_t tss_limit = sizeof(gdt::tss) - 1;
+
+	gdt[5].limit_low = tss_limit & 0xFFFF;
+	gdt[5].base_low = tss_base & 0xFFFF;
+	gdt[5].base_mid = (tss_base >> 16) & 0xFF;
+	gdt[5].access = 0x89;
+	gdt[5].limit = (tss_limit >> 16) & 0x0F;
+	gdt[5].base_high = (tss_base >> 24) & 0xFF;
+
+	auto* tss_high = reinterpret_cast<gdt::tss_entry*>(&gdt[6]);
+	tss_high->base_high = (tss_base >> 32) & 0xFFFFFFFF;
+	tss_high->reserved = 0;
+
+	memory::memset(tss, 0, sizeof(gdt::tss));
+	tss->io_map_base = sizeof(gdt::tss);
+	tss->rsp0 = stack_top;
+
+	gdt::ptr gdt_ptr;
+	gdt_ptr.limit = 7 * sizeof(gdt::entry) - 1;
+	gdt_ptr.base = reinterpret_cast<std::uint64_t>(gdt);
+
+	gdt::gdt_flush(&gdt_ptr);
 }
 
-// C entry point called by each AP after the trampoline brings it to long mode
-extern "C" void ap_entry(std::uint32_t cpu_id)
+extern "C" void ap_entry(struct limine_mp_info* info)
 {
+	std::uint64_t cpu_id = info->extra_argument;
+	cpu_info* my_cpu = &cpu_infos[cpu_id];
+
+	register cpu_info* my_cpu_reg asm("r12") = my_cpu;
+
+	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(my_cpu));
+
+	std::uint64_t ap_stack_top = my_cpu->stack_base + AP_STACK_SIZE;
+	asm volatile("mov %0, %%rsp" : : "r"(ap_stack_top));
+
+	ap_setup_gdt_tss(ap_gdts[cpu_id], &ap_tsss[cpu_id], ap_stack_top);
+	my_cpu_reg->tss = &ap_tsss[cpu_id];
+
+	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(my_cpu_reg));
+
+	sse_enable();
+
 	interrupts::apic::apic.init(acpi::acpi.lapic_address);
 	interrupts::apic::apic.enable_x2apic();
 
-	LOG("AP_%u_online; apic_id=0x%x", cpu_id,
+	my_cpu_reg->online = true;
+#ifdef DEBUG
+	LOG("ap=%u; apic_id=0x%x; online=true", cpu_id,
 	    interrupts::apic::apic.get_id());
+#endif
 
 	for (;;)
 		asm volatile("hlt");
 }
 
-void wake_aps(void)
+void wake_aps(struct limine_mp_response* mp)
 {
-	// ---- allocate pages for AP page tables ----
-	std::uint64_t pml4_phys = memory::buddy.alloc_pages(0);
-	std::uint64_t pdpt_phys = memory::buddy.alloc_pages(0);
-	std::uint64_t pd_phys = memory::buddy.alloc_pages(0);
-
-	if (!pml4_phys || !pdpt_phys || !pd_phys)
-		PANIC("smp: failed to allocate page table pages");
-
-	auto* pml4 = static_cast<std::uint64_t*>(
-	    memory::phys_to_virt(pml4_phys));
-	auto* pdpt = static_cast<std::uint64_t*>(
-	    memory::phys_to_virt(pdpt_phys));
-	auto* pd = static_cast<std::uint64_t*>(
-	    memory::phys_to_virt(pd_phys));
-
-	// ---- set up AP page tables ----
-	memory::memset(pml4, 0, 0x1000);
-	memory::memset(pdpt, 0, 0x1000);
-	memory::memset(pd, 0, 0x1000);
-
-	// Copy kernel higher-half entries (256–511) from BSP's PML4
-	std::uint64_t bsp_pml4_phys = read_cr3();
-	auto* bsp_pml4 = static_cast<std::uint64_t*>(
-	    memory::phys_to_virt(bsp_pml4_phys));
-	for (int i = 256; i < 512; i++)
-		pml4[i] = bsp_pml4[i];
-
-	// Identity-map first 2 MB via PML4[0] → PDPT[0] → PD[0] (2 MB huge page)
-	pml4[0] = pdpt_phys | 0x03;   // present | writable
-	pdpt[0] = pd_phys | 0x03;     // present | writable
-	pd[0] = 0x00 | 0x83;          // present | writable | huge (PS=1), base = 0
-
-	// ---- copy trampoline binary to the low page ----
-	std::uintptr_t tramp_size =
-	_binary_obj_x86_64_smp_trampoline_bin_end -
-	    _binary_obj_x86_64_smp_trampoline_bin_start;
-
-	if (tramp_size > 0x1000)
-		PANIC("smp: trampoline too big (%u bytes)", tramp_size);
-
-	auto* tramp = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(TRAMPOLINE_PAGE));
-	memory::memcpy(tramp, _binary_obj_x86_64_smp_trampoline_bin_start, tramp_size);
-
-	// ---- write GDT entries into the trampoline page (not defined in .asm) ----
-	// Values use the same access-byte conventions as gdt.cpp.
-	// Null descriptor
-	std::uint64_t gdt_null = 0;
-	memory::memcpy(tramp + info_offsets::GDT_ENTRIES,
-	               &gdt_null, 8);
-	// Code32:   access 0x9A (present, ring0, code, exec/read),
-	//           gran 0xCF (G=1, D=1 → 32-bit, limit 0xFFFFF)
-	std::uint64_t gdt_code32 = 0x00CF9A000000FFFF;
-	memory::memcpy(tramp + info_offsets::GDT_ENTRIES + 8,
-	               &gdt_code32, 8);
-	// Data32:   access 0x92 (present, ring0, data, read/write),
-	//           gran 0xCF (G=1, D=1)
-	std::uint64_t gdt_data32 = 0x00CF92000000FFFF;
-	memory::memcpy(tramp + info_offsets::GDT_ENTRIES + 16,
-	               &gdt_data32, 8);
-	// Code64:   access 0x9A (same as kernel code64),
-	//           gran 0xAF (G=1, L=1 → 64-bit, limit 0xFFFFF)
-	std::uint64_t gdt_code64 = 0x00AF9A000000FFFF;
-	memory::memcpy(tramp + info_offsets::GDT_ENTRIES + 24,
-	               &gdt_code64, 8);
-
-	// Set up GDTR pointing to the entries above
-	std::uint16_t gdt_tramp_limit = 4 * 8 - 1; // 31
-	std::uint32_t gdt_tramp_base =
-	    TRAMPOLINE_PAGE + info_offsets::GDT_ENTRIES;
-	memory::memcpy(tramp + info_offsets::GDTR,
-	               &gdt_tramp_limit, 2);
-	memory::memcpy(tramp + info_offsets::GDTR + 2,
-	               &gdt_tramp_base, 4);
-
-	// ---- find BSP index ----
-	int bsp_idx = -1;
-	for (int i = 0; i < acpi::acpi.cpu_count; i++)
+	if (!mp)
 	{
-		if (acpi::acpi.cpus[i].bsp)
-		{
-			bsp_idx = i;
-			break;
-		}
+		PANIC("mp_response=nullptr");
 	}
-	if (bsp_idx < 0)
-		bsp_idx = 0;
 
-	// ---- wake each AP ----
-	for (int i = 0; i < acpi::acpi.cpu_count; i++)
+	cpu_count = mp->cpu_count;
+
+	for (std::uint64_t i = 0; i < cpu_count; i++)
 	{
-		if (i == bsp_idx)
+		auto* info = mp->cpus[i];
+		cpu_infos[i].self = &cpu_infos[i];
+		cpu_infos[i].cpu_id = i;
+		cpu_infos[i].lapic_id = info->lapic_id;
+		cpu_infos[i].bsp = (info->lapic_id == mp->bsp_lapic_id);
+		cpu_infos[i].online = cpu_infos[i].bsp;
+		cpu_infos[i].startup_failed = false;
+		cpu_infos[i].stack_base = 0;
+		cpu_infos[i].tss = nullptr;
+	}
+
+	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(&cpu_infos[0]));
+
+	LOG("cpu_count=%u", cpu_count);
+
+	for (std::uint64_t i = 0; i < cpu_count; i++)
+	{
+		if (cpu_infos[i].bsp)
 			continue;
 
-		std::uint8_t apic_id = acpi::acpi.cpus[i].apic_id;
+		auto* info = mp->cpus[i];
 
-		// Allocate stack (4 pages = 16 KiB)
 		std::uint64_t stack_phys = memory::buddy.alloc_pages(2);
 		if (!stack_phys)
-			PANIC("smp: failed to alloc stack for AP %d", i);
+			PANIC("failed to alloc stack for AP %u", i);
 
-		std::uint64_t stack_top =
-		    (stack_phys + 0x4000) + memory::hhdm_offset;
+		cpu_infos[i].stack_base = reinterpret_cast<std::uint64_t>(
+		    memory::phys_to_virt(stack_phys));
 
-		// ---- fill info structure in the trampoline page ----
-		auto gdt_limit = static_cast<std::uint16_t>(
-		    gdt::gdt.get_gdt_ptr()->limit);
-		auto gdt_base = gdt::gdt.get_gdt_ptr()->base;
+		info->extra_argument = i;
 
-		memory::memcpy(tramp + info_offsets::GDT_LIMIT,
-			       &gdt_limit, 2);
-		memory::memcpy(tramp + info_offsets::GDT_BASE,
-			       &gdt_base, 8);
-		memory::memcpy(tramp + info_offsets::CR3,
-			       &pml4_phys, 8);
-		memory::memcpy(tramp + info_offsets::STACK_TOP,
-			       &stack_top, 8);
+		__atomic_store_n(&info->goto_address,
+				 (limine_goto_address)ap_entry,
+				 __ATOMIC_SEQ_CST);
 
-		auto entry_fn =
-		    reinterpret_cast<std::uint64_t>(ap_entry);
-		memory::memcpy(tramp + info_offsets::ENTRY_FN,
-			       &entry_fn, 8);
+		std::uint64_t spins = 0;
+		while (!cpu_infos[i].online && spins < 100000000)
+		{
+			asm volatile("pause" : : : "memory");
+			spins++;
+		}
 
-		auto cpu_id = static_cast<std::uint32_t>(i);
-		memory::memcpy(tramp + info_offsets::CPU_ID,
-			       &cpu_id, 4);
-
+		if (!cpu_infos[i].online)
+		{
+			cpu_infos[i].startup_failed = true;
 #ifdef DEBUG
-		LOG("waking_ap_%d: apic_id=0x%x; stack_top=%p",
-		    i, apic_id, stack_top);
+			LOG("AP_%u_startup_timed_out", i);
 #endif
-
-		// ---- send INIT IPI ----
-		interrupts::apic::apic.send_ipi(
-		    apic_id, 0, 5); // ICR delivery mode: INIT
-		udelay(10000);
-
-		// ---- send first SIPI ----
-		std::uint8_t vector =
-		    static_cast<std::uint8_t>(TRAMPOLINE_PAGE >> 12);
-		interrupts::apic::apic.send_startup_ipi(apic_id, vector);
-		udelay(200);
-
-		// ---- send second SIPI (recommended for reliability) ----
-		interrupts::apic::apic.send_startup_ipi(apic_id, vector);
-		udelay(200);
+		}
 	}
 
 #ifdef DEBUG
-	LOG("smp: all APs woken");
+	std::uint64_t online = 0;
+	for (std::uint64_t i = 0; i < cpu_count; i++)
+		if (cpu_infos[i].online && !cpu_infos[i].startup_failed)
+			online++;
+	LOG("online=%u; count=%u", online, cpu_count);
 #endif
 }
 

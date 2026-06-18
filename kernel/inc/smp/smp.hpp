@@ -1,15 +1,47 @@
 #pragma once
 
-#include <acpi/acpi.hpp>
+#include <cstddef>
 #include <cstdint>
+#include <limine.h>
+
+namespace gdt
+{
+struct entry;
+struct tss;
+} // namespace gdt
 
 namespace smp
 {
 
-static constexpr std::uint64_t TRAMPOLINE_PAGE = 0x7000;
+static constexpr std::uint64_t MAX_CPUS = 64;
+static constexpr std::uint64_t AP_STACK_SIZE = 16384;
 
-extern "C" void ap_entry(std::uint32_t cpu_id);
+struct cpu_info {
+	cpu_info* self;
+	std::uint64_t cpu_id;
+	std::uint32_t lapic_id;
+	bool online;
+	bool bsp;
+	bool startup_failed;
+	std::uint64_t stack_base;
+	void* tss;
+};
 
-void wake_aps(void);
+static_assert(offsetof(cpu_info, self) == 0,
+              "cpu_info.self must be at offset 0 for gs:0 fetch");
+
+extern cpu_info cpu_infos[MAX_CPUS];
+extern std::uint64_t cpu_count;
+
+extern "C" void ap_entry(struct limine_mp_info* info);
+
+void wake_aps(struct limine_mp_response* mp);
+
+static inline cpu_info* this_cpu()
+{
+	cpu_info* info;
+	asm volatile("mov %%gs:0, %0" : "=r"(info));
+	return info;
+}
 
 } // namespace smp
