@@ -322,7 +322,7 @@ void APIC::timer_calibrate(void)
 {
 	std::uint64_t hpet_freq = timers::hpet::hpet.get_freq();
 	if (hpet_freq == 0)
-		return;
+		PANIC("hpet_freq=0; cannot_calibrate_lapic_timer");
 
 	this->reg_write(this->REG_TIMER_DCR, this->TIMER_DIV_16);
 

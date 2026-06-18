@@ -14,6 +14,8 @@ HPET hpet;
 
 void HPET::init(void)
 {
+	if (acpi::acpi.hpet_address == 0)
+		PANIC("hpet_address=0; acpi_missing_or_no_hpet_table");
 	this->HPET_BASE_ADDRESS = acpi::acpi.hpet_address;
 #ifdef DEBUG
 	LOG("base_address=%x", this->HPET_BASE_ADDRESS);

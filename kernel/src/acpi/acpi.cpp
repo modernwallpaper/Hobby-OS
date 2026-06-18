@@ -2,7 +2,7 @@
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
-#include <timers/hpet/hpet.hpp>
+#include <hpet/hpet.hpp>
 
 namespace acpi
 {
@@ -100,6 +100,8 @@ void ACPI::init(void* rsdp_addr)
 
 	auto* hpet_table = reinterpret_cast<struct timers::hpet::hpet*>(
 	    this->find_table("HPET"));
+	if (!hpet_table)
+		PANIC("hpet_table_not_found");
 	this->hpet_address = hpet_table->address.address;
 
 	this->lapic_address = this->madt_table->local_apic_address;
