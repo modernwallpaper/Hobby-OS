@@ -37,6 +37,8 @@ extern "C" void ap_entry(struct limine_mp_info* info);
 
 void wake_aps(struct limine_mp_response* mp);
 
+void sse_enable(void);
+
 static inline cpu_info* this_cpu()
 {
 	cpu_info* info;

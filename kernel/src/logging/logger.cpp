@@ -1,5 +1,6 @@
 #include <logging/logger.hpp>
 #include <ports/ports.hpp>
+#include <sync/spinlock.hpp>
 
 void put(char c)
 {
@@ -134,6 +135,7 @@ void vprintf(const char* fmt, std::va_list args)
 
 namespace logger
 {
+static sync::IrqSpinlock log_lock;
 void init()
 {
 	ports::outb(PORT_COM + 1, 0x00); // deactivate interrupts
@@ -150,14 +152,19 @@ void init()
 
 void printf(const char* fmt, ...)
 {
+	std::uint64_t flags;
+	log_lock.lock_save(flags);
 	std::va_list args;
 	va_start(args, fmt);
 	vprintf(fmt, args);
 	va_end(args);
+	log_lock.unlock_restore(flags);
 }
 
 void logf(const char* module, const char* func, const char* fmt, ...)
 {
+	std::uint64_t flags;
+	log_lock.lock_save(flags);
 	put('[');
 	puts(module);
 	puts("] [");
@@ -169,6 +176,7 @@ void logf(const char* module, const char* func, const char* fmt, ...)
 	vprintf(fmt, args);
 	va_end(args);
 	put('\n');
+	log_lock.unlock_restore(flags);
 }
 
 } // namespace logger

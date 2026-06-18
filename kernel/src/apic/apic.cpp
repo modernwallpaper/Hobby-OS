@@ -91,6 +91,8 @@ std::uint32_t APIC::reg_read(std::uint32_t offset)
 // initialize the local APIC: enable, map MMIO, program SVR/TPR/LVT
 void APIC::init(std::uint32_t lapic_phys_addr)
 {
+	this->mode = Mode::XAPIC;
+
 	std::uint64_t apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
 #ifdef DEBUG
 	LOG("IA32_APIC_BASE=0x%016llx", apic_base_msr);
@@ -215,7 +217,10 @@ void APIC::eoi(void)
 // read the local APIC ID
 std::uint8_t APIC::get_id(void)
 {
-	return static_cast<std::uint8_t>(this->reg_read(this->REG_ID) >> 24);
+	if (this->mode == Mode::X2APIC)
+		return static_cast<std::uint8_t>(this->reg_read(this->REG_ID));
+	else
+		return static_cast<std::uint8_t>(this->reg_read(this->REG_ID) >> 24);
 }
 
 // read the local APIC version
@@ -404,7 +409,6 @@ void init_all(void)
 		lapic_addr = 0xFEE00000;
 
 	apic.init(lapic_addr);
-	apic.enable_x2apic();
 
 	std::uint32_t ioapic_addr = acpi::acpi.ioapic_address;
 	if (ioapic_addr == 0)
@@ -413,6 +417,11 @@ void init_all(void)
 	interrupts::ioapic::ioapic.init(ioapic_addr);
 
 	apic.timer_calibrate();
+}
+
+void enable_x2apic_bsp(void)
+{
+	apic.enable_x2apic();
 }
 
 } // namespace apic

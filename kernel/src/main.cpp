@@ -90,6 +90,8 @@ extern void (*__init_array_end[])(void);
 
 extern "C" void kmain(void)
 {
+	smp::sse_enable();
+
 	if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false)
 	{
 		hcf();
@@ -168,11 +170,10 @@ extern "C" void kmain(void)
 
 	interrupts::apic::init_all();
 
+	interrupts::apic::apic.enable_x2apic();
+
 	interrupts::apic::apic.timer_periodic(1000, 48);
 
-#ifdef DEBUG
-	LOG("waking_aps");
-#endif
 	smp::wake_aps(mp_request.response);
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");

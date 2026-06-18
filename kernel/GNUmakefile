@@ -138,10 +138,6 @@ ifeq ($(ARCH),x86_64)
         -m64 \
         -march=x86-64 \
         -mabi=sysv \
-        -mno-80387 \
-        -mno-mmx \
-        -mno-sse \
-        -mno-sse2 \
         -mno-red-zone \
         -mcmodel=kernel
     override LDFLAGS += \

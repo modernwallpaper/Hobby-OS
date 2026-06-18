@@ -21,22 +21,22 @@ static void wrmsr(std::uint32_t msr, std::uint64_t value)
 {
 	std::uint32_t eax = value & 0xFFFFFFFF;
 	std::uint32_t edx = (value >> 32) & 0xFFFFFFFF;
-	asm volatile("wrmsr" : : "c"(msr), "a"(eax), "d"(edx));
+	__asm__ volatile("wrmsr" : : "c"(msr), "a"(eax), "d"(edx));
 }
 
-static void sse_enable(void)
+void sse_enable(void)
 {
 	std::uint64_t cr0;
-	asm volatile("mov %%cr0, %0" : "=r"(cr0));
+	__asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
 	cr0 &= ~(1ULL << 2);
 	cr0 |= (1ULL << 1);
-	asm volatile("mov %0, %%cr0" : : "r"(cr0));
+	__asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
 
 	std::uint64_t cr4;
-	asm volatile("mov %%cr4, %0" : "=r"(cr4));
+	__asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
 	cr4 |= (1ULL << 9);
 	cr4 |= (1ULL << 10);
-	asm volatile("mov %0, %%cr4" : : "r"(cr4));
+	__asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
 }
 
 static void ap_setup_gdt_tss(gdt::entry* gdt, gdt::tss* tss,
@@ -87,34 +87,35 @@ static void ap_setup_gdt_tss(gdt::entry* gdt, gdt::tss* tss,
 
 extern "C" void ap_entry(struct limine_mp_info* info)
 {
+	sse_enable();
+
 	std::uint64_t cpu_id = info->extra_argument;
 	cpu_info* my_cpu = &cpu_infos[cpu_id];
 
-	register cpu_info* my_cpu_reg asm("r12") = my_cpu;
+	register cpu_info* my_cpu_reg __asm__("r12") = my_cpu;
 
 	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(my_cpu));
 
 	std::uint64_t ap_stack_top = my_cpu->stack_base + AP_STACK_SIZE;
-	asm volatile("mov %0, %%rsp" : : "r"(ap_stack_top));
+	__asm__ volatile("mov %0, %%rsp" : : "r"(ap_stack_top));
 
 	ap_setup_gdt_tss(ap_gdts[cpu_id], &ap_tsss[cpu_id], ap_stack_top);
 	my_cpu_reg->tss = &ap_tsss[cpu_id];
 
 	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(my_cpu_reg));
 
-	sse_enable();
-
 	interrupts::apic::apic.init(acpi::acpi.lapic_address);
 	interrupts::apic::apic.enable_x2apic();
 
-	my_cpu_reg->online = true;
 #ifdef DEBUG
 	LOG("ap=%u; apic_id=0x%x; online=true", cpu_id,
 	    interrupts::apic::apic.get_id());
 #endif
 
+	my_cpu_reg->online = true;
+
 	for (;;)
-		asm volatile("hlt");
+		__asm__ volatile("hlt");
 }
 
 void wake_aps(struct limine_mp_response* mp)
@@ -141,11 +142,16 @@ void wake_aps(struct limine_mp_response* mp)
 
 	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(&cpu_infos[0]));
 
+#ifdef DEBUG
 	LOG("cpu_count=%u", cpu_count);
-
+#endif
+	// wake only AP with lapic_id=2 to test if it works as first wake
 	for (std::uint64_t i = 0; i < cpu_count; i++)
 	{
 		if (cpu_infos[i].bsp)
+			continue;
+
+		if (cpu_infos[i].lapic_id != 2)
 			continue;
 
 		auto* info = mp->cpus[i];
@@ -159,14 +165,22 @@ void wake_aps(struct limine_mp_response* mp)
 
 		info->extra_argument = i;
 
+#ifdef DEBUG
+		LOG("waking_ap_%u", i);
+#endif
+
 		__atomic_store_n(&info->goto_address,
 				 (limine_goto_address)ap_entry,
 				 __ATOMIC_SEQ_CST);
 
+#ifdef DEBUG
+		LOG("woken_ap_%u", i);
+#endif
+
 		std::uint64_t spins = 0;
-		while (!cpu_infos[i].online && spins < 100000000)
+		while (!cpu_infos[i].online && spins < 1000000)
 		{
-			asm volatile("pause" : : : "memory");
+			__asm__ volatile("pause" : : : "memory");
 			spins++;
 		}
 
