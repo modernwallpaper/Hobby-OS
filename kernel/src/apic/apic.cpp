@@ -1,11 +1,11 @@
 #include <acpi/acpi.hpp>
 #include <apic/apic.hpp>
 #include <apic/ioapic.hpp>
+#include <hpet/hpet.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/paging.hpp>
 #include <pic/pic.hpp>
-#include <timers/hpet/hpet.hpp>
 
 namespace interrupts
 {

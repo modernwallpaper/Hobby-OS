@@ -1,8 +1,8 @@
 #include <acpi/acpi.hpp>
+#include <hpet/hpet.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/paging.hpp>
-#include <timers/hpet/hpet.hpp>
 
 namespace timers
 {

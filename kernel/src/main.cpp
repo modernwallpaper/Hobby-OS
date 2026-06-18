@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <gdt/gdt.hpp>
+#include <hpet/hpet.hpp>
 #include <idt/idt.hpp>
 #include <limine.h>
 #include <logging/logger.hpp>
@@ -12,7 +13,6 @@
 #include <panic/panic.hpp>
 #include <pic/pic.hpp>
 #include <ports/ports.hpp>
-#include <timers/hpet/hpet.hpp>
 
 namespace
 {
