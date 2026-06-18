@@ -56,7 +56,10 @@ struct MemRegion {
 class Buddy {
 private:
 	mutable sync::Spinlock lock;
+	static constexpr std::uint64_t CANARY_VAL = 0xDEADBEEFCAFEBABE;
+	std::uint64_t canary_before;
 	FreeBlock* free_lists[MAX_ORDER + 1];
+	std::uint64_t canary_after;
 	std::uint64_t total_pages;
 	int region_count;		// Number of valid entries in regions[]
 	MemRegion regions[MAX_REGIONS]; // usable memory regions discovered

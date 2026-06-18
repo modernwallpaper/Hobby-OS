@@ -102,8 +102,6 @@ extern "C" void ap_entry(struct limine_mp_info* info)
 	ap_setup_gdt_tss(ap_gdts[cpu_id], &ap_tsss[cpu_id], ap_stack_top);
 	my_cpu_reg->tss = &ap_tsss[cpu_id];
 
-	wrmsr(MSR_GS_BASE, reinterpret_cast<std::uint64_t>(my_cpu_reg));
-
 	interrupts::apic::apic.init(acpi::acpi.lapic_address);
 	interrupts::apic::apic.enable_x2apic();
 
@@ -145,16 +143,16 @@ void wake_aps(struct limine_mp_response* mp)
 #ifdef DEBUG
 	LOG("cpu_count=%u", cpu_count);
 #endif
-	// wake only AP with lapic_id=2 to test if it works as first wake
+
+	// Batch-allocate all AP stacks first (before waking any AP)
 	for (std::uint64_t i = 0; i < cpu_count; i++)
 	{
 		if (cpu_infos[i].bsp)
 			continue;
 
-		if (cpu_infos[i].lapic_id != 2)
-			continue;
-
-		auto* info = mp->cpus[i];
+#ifdef DEBUG
+		LOG("alloc_stack_ap_%u", i);
+#endif
 
 		std::uint64_t stack_phys = memory::buddy.alloc_pages(2);
 		if (!stack_phys)
@@ -162,12 +160,21 @@ void wake_aps(struct limine_mp_response* mp)
 
 		cpu_infos[i].stack_base = reinterpret_cast<std::uint64_t>(
 		    memory::phys_to_virt(stack_phys));
+	}
 
-		info->extra_argument = i;
+	// Now wake APs one by one
+	for (std::uint64_t i = 0; i < cpu_count; i++)
+	{
+		if (cpu_infos[i].bsp)
+			continue;
+
+		auto* info = mp->cpus[i];
 
 #ifdef DEBUG
 		LOG("waking_ap_%u", i);
 #endif
+
+		info->extra_argument = i;
 
 		__atomic_store_n(&info->goto_address,
 				 (limine_goto_address)ap_entry,

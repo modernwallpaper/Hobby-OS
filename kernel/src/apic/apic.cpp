@@ -70,19 +70,21 @@ std::uint32_t APIC::x2apic_reg_read(std::uint32_t offset)
 	return static_cast<std::uint32_t>(this->rdmsr(msr));
 }
 
-// dispatch register write to xAPIC or x2APIC based on current mode
+// dispatch register write to xAPIC or x2APIC based on hardware state
+// (reads IA32_APIC_BASE bit 10 directly instead of the shared software
+//  mode flag, because the flag can be set by a different CPU)
 void APIC::reg_write(std::uint32_t offset, std::uint32_t value)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 		this->x2apic_reg_write(offset, value);
 	else
 		this->xapic_reg_write(offset, value);
 }
 
-// dispatch register read to xAPIC or x2APIC based on current mode
+// dispatch register read to xAPIC or x2APIC based on hardware state
 std::uint32_t APIC::reg_read(std::uint32_t offset)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 		return this->x2apic_reg_read(offset);
 	else
 		return this->xapic_reg_read(offset);
@@ -182,19 +184,33 @@ bool APIC::enable_x2apic(void)
 		return false;
 	}
 
+	// Read the actual hardware state from IA32_APIC_BASE
+	// (the software mode flag may be stale since the global `apic` is shared
+	// across CPUs)
+	std::uint64_t apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
+	if ((apic_base_msr >> 10) & 1)
+	{
+		// Already in x2APIC mode; just ensure SVR is enabled
+		this->wrmsr(0x80F, 0xFF | this->SVR_ENABLE);
+		this->mode = Mode::X2APIC;
+		return true;
+	}
+
 #ifdef DEBUG
 	LOG("enabling_x2apic");
 #endif
 
-	// Step 1: temporarily disable the LAPIC (clear SVR enable bit)
-	this->reg_write(this->REG_SVR,
-			this->reg_read(this->REG_SVR) & ~this->SVR_ENABLE);
+	// Step 1: temporarily disable the LAPIC (clear SVR enable bit) via MMIO.
+	// Use the raw xAPIC accessors to bypass the mode-dispatch, because the
+	// shared software `mode` flag may still say X2APIC (set by an AP).
+	this->xapic_reg_write(this->REG_SVR,
+			this->xapic_reg_read(this->REG_SVR) & ~this->SVR_ENABLE);
 
 	// Step 2: set x2APIC enable bit (bit 10) in IA32_APIC_BASE
-	std::uint64_t apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
+	apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
 	apic_base_msr |= (1 << 10); // x2APIC enable
 	apic_base_msr |= (1 << 11); // LAPIC enable
-	this->wrmsr(MSR_APIC_BASE, apic_base_msr);
+	this->wrmsr(this->MSR_APIC_BASE, apic_base_msr);
 
 	// Step 3: switch to MSR-based access
 	this->mode = Mode::X2APIC;
@@ -217,7 +233,7 @@ void APIC::eoi(void)
 // read the local APIC ID
 std::uint8_t APIC::get_id(void)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 		return static_cast<std::uint8_t>(this->reg_read(this->REG_ID));
 	else
 		return static_cast<std::uint8_t>(this->reg_read(this->REG_ID) >> 24);
@@ -230,17 +246,17 @@ std::uint8_t APIC::get_version(void)
 					 0xFF);
 }
 
-// check if the APIC is in x2APIC mode
+// check if the local APIC is in x2APIC mode via hardware MSR
 bool APIC::is_x2apic_enabled(void) const
 {
-	return this->mode == Mode::X2APIC;
+	return APIC::rdmsr(MSR_APIC_BASE) & (1 << 10);
 }
 
 // send an IPI to a specific APIC ID
 void APIC::send_ipi(std::uint8_t apic_id, std::uint8_t vector,
 		    std::uint32_t delivery_mode)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 	{
 		std::uint64_t icr = static_cast<std::uint64_t>(apic_id) << 32;
 		icr |= vector | delivery_mode | this->ICR_PHYSICAL |
@@ -262,7 +278,7 @@ void APIC::send_ipi(std::uint8_t apic_id, std::uint8_t vector,
 // send an IPI to all other APICs
 void APIC::send_ipi_all(std::uint8_t vector, std::uint32_t delivery_mode)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 	{
 		std::uint64_t icr = vector | delivery_mode | this->ICR_ASSERT |
 				    this->ICR_ALL_EXCLUDING_SELF;
@@ -283,7 +299,7 @@ void APIC::send_ipi_all(std::uint8_t vector, std::uint32_t delivery_mode)
 // send an IPI to self
 void APIC::send_ipi_self(std::uint8_t vector, std::uint32_t delivery_mode)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 	{
 		std::uint64_t icr =
 		    vector | delivery_mode | this->ICR_ASSERT | this->ICR_SELF;
@@ -303,7 +319,7 @@ void APIC::send_ipi_self(std::uint8_t vector, std::uint32_t delivery_mode)
 // send a startup IPI to bring up an AP
 void APIC::send_startup_ipi(std::uint8_t apic_id, std::uint8_t vector)
 {
-	if (this->mode == Mode::X2APIC)
+	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
 	{
 		std::uint64_t icr = static_cast<std::uint64_t>(apic_id) << 32;
 		icr |= vector | this->ICR_STARTUP | this->ICR_PHYSICAL |

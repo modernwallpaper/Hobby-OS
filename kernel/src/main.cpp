@@ -170,11 +170,11 @@ extern "C" void kmain(void)
 
 	interrupts::apic::init_all();
 
-	interrupts::apic::apic.enable_x2apic();
-
 	interrupts::apic::apic.timer_periodic(1000, 48);
 
 	smp::wake_aps(mp_request.response);
+
+	interrupts::apic::apic.enable_x2apic();
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 	asm("sti");

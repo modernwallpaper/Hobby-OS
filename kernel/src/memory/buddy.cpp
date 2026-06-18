@@ -10,6 +10,9 @@ Buddy buddy;
 
 void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count)
 {
+	this->canary_before = CANARY_VAL;
+	this->canary_after = CANARY_VAL;
+
 	// clear all free lists
 	for (int i = 0; i <= MAX_ORDER; i++)
 		this->free_lists[i] = nullptr;
@@ -69,6 +72,14 @@ std::uint64_t Buddy::alloc_pages(int order)
 {
 	this->lock.lock();
 
+	if (this->canary_before != CANARY_VAL ||
+	    this->canary_after != CANARY_VAL)
+	{
+		PANIC(
+		    "buddy_canary_corrupted; before=0x%016llx; after=0x%016llx; order=%d",
+		    this->canary_before, this->canary_after, order);
+	}
+
 	if (order < 0 || order > MAX_ORDER)
 	{
 		this->lock.unlock();
@@ -87,6 +98,24 @@ std::uint64_t Buddy::alloc_pages(int order)
 
 	// pop the head of the list
 	FreeBlock* block = this->free_lists[current];
+
+	// Validate the pointer before dereferencing — a non-canonical address
+	// would cause a #GP (vector 13) rather than a #PF.
+	std::uint64_t block_val = reinterpret_cast<std::uint64_t>(block);
+	if ((block_val >> 47) != 0 && (block_val >> 47) != 0x1FFFF)
+	{
+		PANIC(
+		    "alloc_pages; non-canonical free_lists[%d] = %p; order=%d; canary_before=0x%016llx; canary_after=0x%016llx",
+		    current, block, order, this->canary_before,
+		    this->canary_after);
+	}
+	if (block->magic != FREE_MAGIC)
+	{
+		PANIC(
+		    "alloc_pages; bad_magic in free_lists[%d] = %p; magic=0x%016llx (expected 0x%016llx); order=%d",
+		    current, block, block->magic, FREE_MAGIC, order);
+	}
+
 	this->free_lists[current] = block->next;
 
 	std::uint64_t phys = virt_to_phys(block);
