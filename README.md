@@ -14,5 +14,5 @@ i usually run it with this command, but you also have many other options.
 Just take a look into the `GNUMakefile`.
 
 ```bash
-make run-hdd DEBUG=1 QEMUFLAGS="-m 12G -smp 4 -serial stdio" 
+make run-hdd DEBUG=1 QEMUFLAGS="-no-reboot -d int,cpu_reset -accel kvm -cpu host -m 12G -smp 8 -serial stdio"
 ```
