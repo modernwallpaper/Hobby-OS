@@ -19,6 +19,9 @@ private:
 	volatile std::uint32_t* base;
 	std::uint64_t bus_frequency;
 
+	std::uint32_t timer_period_count;
+	std::uint8_t timer_period_vector;
+
 	static constexpr std::uint64_t MSR_APIC_BASE = 0x1B;
 
 	static constexpr std::uint32_t REG_ID = 0x020;
@@ -121,6 +124,7 @@ public:
 	void timer_calibrate(void);
 	void timer_oneshot(std::uint32_t us, std::uint8_t vector);
 	void timer_periodic(std::uint32_t us, std::uint8_t vector);
+	void timer_oneshot_periodic_tick(void);
 	std::uint64_t bus_freq(void);
 };
 

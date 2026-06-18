@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limine.h>
+#include <panic/panic.hpp>
 #include <sync/spinlock.hpp>
 
 namespace memory
@@ -25,8 +26,7 @@ extern std::uint64_t hhdm_offset;
 static inline void* phys_to_virt(std::uint64_t phys)
 {
 	if (__builtin_expect(hhdm_offset == 0, 0))
-		while (true)
-			asm volatile("hlt");
+		PANIC("hddm_offset==0");
 	return reinterpret_cast<void*>(phys + hhdm_offset);
 }
 
@@ -35,8 +35,7 @@ static inline std::uint64_t virt_to_phys(void* virt)
 {
 	auto v = reinterpret_cast<std::uint64_t>(virt);
 	if (__builtin_expect(v < hhdm_offset, 0))
-		while (true)
-			asm volatile("hlt");
+		PANIC("virt<hddm_offset");
 	return v - hhdm_offset;
 }
 

@@ -74,6 +74,7 @@ static void (*irq_table[16])(void) = {irq0,  irq1,  irq2,  irq3, irq4,	irq5,
 void lapic_timer_handler(frame* frame)
 {
 	apic::apic.eoi();
+	apic::apic.timer_oneshot_periodic_tick();
 }
 
 // main interrupt handler: dispatch exceptions and IRQs

@@ -80,10 +80,29 @@ struct __attribute__((packed)) madt_entry_x2apic {
 	std::uint32_t processor_uid;
 };
 
+struct __attribute__((packed)) madt_entry_int_override {
+	madt_entry_header header;
+	std::uint8_t bus;
+	std::uint8_t source;
+	std::uint32_t irq;
+	std::uint16_t flags;
+};
+
 class ACPI {
 private:
 	rsdp* rsdp_ptr;
 	madt* madt_table;
+
+	static constexpr int MAX_ISO_OVERRIDES = 16;
+
+	struct IsoOverride {
+		std::uint8_t source;
+		std::uint32_t irq;
+		std::uint16_t flags;
+	};
+
+	IsoOverride iso_overrides[MAX_ISO_OVERRIDES];
+	int iso_override_count;
 
 	bool validate_checksum(void* table, std::uint32_t length);
 	sdt_header* find_table(const char* signature);
@@ -97,6 +116,7 @@ public:
 	bool x2apic_present;
 
 	void init(void* rsdp_addr);
+	std::uint32_t resolve_irq(std::uint8_t irq);
 };
 
 extern ACPI acpi;

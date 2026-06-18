@@ -373,9 +373,19 @@ void APIC::timer_periodic(std::uint32_t us, std::uint8_t vector)
 	     (this->bus_frequency / this->CALIBRATION_DIVIDER)) /
 	    1000000);
 
+	this->timer_period_count = count;
+	this->timer_period_vector = vector;
+
 	this->reg_write(this->REG_TIMER_DCR, this->TIMER_DIV_16);
 	this->reg_write(this->REG_TIMER_ICR, count);
-	this->reg_write(this->REG_LVT_TIMER, vector | this->LVT_TIMER_PERIODIC);
+	this->reg_write(this->REG_LVT_TIMER, vector | this->LVT_TIMER_ONESHOT);
+}
+
+void APIC::timer_oneshot_periodic_tick(void)
+{
+	if (this->bus_frequency == 0)
+		return;
+	this->reg_write(this->REG_TIMER_ICR, this->timer_period_count);
 }
 
 // return the calibrated bus frequency

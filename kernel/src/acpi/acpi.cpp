@@ -139,6 +139,21 @@ void ACPI::init(void* rsdp_addr)
 #endif
 			break;
 		}
+		case MADT_INT_OVERRIDE: {
+			auto* ov =
+			    reinterpret_cast<madt_entry_int_override*>(entry);
+			if (this->iso_override_count < MAX_ISO_OVERRIDES)
+			{
+				this->iso_overrides[this->iso_override_count]
+				    .source = ov->source;
+				this->iso_overrides[this->iso_override_count]
+				    .irq = ov->irq;
+				this->iso_overrides[this->iso_override_count]
+				    .flags = ov->flags;
+				this->iso_override_count++;
+			}
+			break;
+		}
 		case MADT_LOCAL_X2APIC:
 			this->x2apic_present = true;
 			break;
@@ -154,6 +169,16 @@ void ACPI::init(void* rsdp_addr)
 	LOG("lapic=0x%x; ioapic=0x%x; x2apic=%s", this->lapic_address,
 	    this->ioapic_address, this->x2apic_present ? "yes" : "no");
 #endif
+}
+
+std::uint32_t ACPI::resolve_irq(std::uint8_t irq)
+{
+	for (int i = 0; i < this->iso_override_count; i++)
+	{
+		if (this->iso_overrides[i].source == irq)
+			return this->iso_overrides[i].irq;
+	}
+	return irq;
 }
 
 } // namespace acpi
