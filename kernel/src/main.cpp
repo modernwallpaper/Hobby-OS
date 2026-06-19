@@ -14,6 +14,7 @@
 #include <pic/pic.hpp>
 #include <ports/ports.hpp>
 #include <smp/smp.hpp>
+#include <tsc/tsc.hpp>
 
 namespace
 {
@@ -176,6 +177,12 @@ extern "C" void kmain(void)
 	smp::wake_aps(mp_request.response);
 
 	interrupts::apic::apic.enable_x2apic();
+
+	std::uint32_t eax, ebx, ecx, edx;
+	interrupts::apic::apic.cpuid(0x80000007, eax, ebx, ecx, edx);
+	LOG("CPUID.80000007: eax=%x ebx=%x ecx=%x edx=%x", eax, ebx, ecx, edx);
+
+	tsc::tsc.init();
 
 	auto boot_end_ticks = timers::hpet::hpet.read_counter();
 	auto elapsed_ticks = boot_end_ticks - boot_start_ticks;

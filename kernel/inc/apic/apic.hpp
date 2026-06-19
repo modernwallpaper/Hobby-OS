@@ -92,9 +92,6 @@ private:
 
 	static std::uint64_t rdmsr(std::uint32_t msr);
 	static void wrmsr(std::uint32_t msr, std::uint64_t value);
-	static void cpuid(std::uint32_t leaf, std::uint32_t& eax,
-			  std::uint32_t& ebx, std::uint32_t& ecx,
-			  std::uint32_t& edx);
 
 	void xapic_reg_write(std::uint32_t offset, std::uint32_t value);
 	std::uint32_t xapic_reg_read(std::uint32_t offset);
@@ -109,6 +106,11 @@ public:
 	APIC();
 
 	void init(std::uint32_t lapic_phys_addr);
+
+	static void cpuid(std::uint32_t leaf, std::uint32_t& eax,
+			  std::uint32_t& ebx, std::uint32_t& ecx,
+			  std::uint32_t& edx);
+
 	bool enable_x2apic(void);
 	void eoi(void);
 	std::uint8_t get_id(void);
