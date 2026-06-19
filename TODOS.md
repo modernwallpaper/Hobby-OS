@@ -1,4 +1,0 @@
-- [x] Scheduler tick — Set up the LAPIC timer as a periodic interrupt at, say, 1ms and build a round-robin scheduler
-- [x] Wake APs — Send SIPIs to bring up the other 3 cores and get them into a known state
-- [ ] udelay() — Expose a blocking microsecond-delay using the HPET or LAPIC timer for driver development
-- [ ] TSC calibration — Use the HPET to find the TSC frequency, then use rdtsc for higher-resolution / lower-overhead timing

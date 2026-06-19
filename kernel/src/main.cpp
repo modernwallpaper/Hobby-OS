@@ -178,10 +178,6 @@ extern "C" void kmain(void)
 
 	interrupts::apic::apic.enable_x2apic();
 
-	std::uint32_t eax, ebx, ecx, edx;
-	interrupts::apic::apic.cpuid(0x80000007, eax, ebx, ecx, edx);
-	LOG("CPUID.80000007: eax=%x ebx=%x ecx=%x edx=%x", eax, ebx, ecx, edx);
-
 	tsc::tsc.init();
 
 	auto boot_end_ticks = timers::hpet::hpet.read_counter();
