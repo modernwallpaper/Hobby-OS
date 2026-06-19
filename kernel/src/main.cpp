@@ -166,6 +166,7 @@ extern "C" void kmain(void)
 
 	timers::hpet::hpet.init();
 
+	auto boot_start_ticks = timers::hpet::hpet.read_counter();
 	// PIC/APIC
 
 	interrupts::apic::init_all();
@@ -175,6 +176,12 @@ extern "C" void kmain(void)
 	smp::wake_aps(mp_request.response);
 
 	interrupts::apic::apic.enable_x2apic();
+
+	auto boot_end_ticks = timers::hpet::hpet.read_counter();
+	auto elapsed_ticks = boot_end_ticks - boot_start_ticks;
+	auto period_fs = timers::hpet::hpet.get_freq();
+	auto elapsed_ns = (elapsed_ticks * period_fs) / 1'000'000;
+	LOG("Boot time: %llu ns (%llu ms)", elapsed_ns, elapsed_ns / 1'000'000);
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 	asm("sti");

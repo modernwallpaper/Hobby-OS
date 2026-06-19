@@ -26,7 +26,7 @@ extern std::uint64_t hhdm_offset;
 static inline void* phys_to_virt(std::uint64_t phys)
 {
 	if (__builtin_expect(hhdm_offset == 0, 0))
-		PANIC("hddm_offset==0");
+		PANIC("hhdm_offset==0");
 	return reinterpret_cast<void*>(phys + hhdm_offset);
 }
 
