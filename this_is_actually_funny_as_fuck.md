@@ -1,4 +1,4 @@
-### Okay, i dont know what i did, where on commit "what the actual fuck"
+### Okay, i dont know what i did; were on commit "what the actual fuck"
 So the problem is, that it tripple faults right after waking up AP2. But you would asume that because of the tripple fault,
 the system reboots and then tripple faults again at the exact same point, ending up in an infinite loop of crashing and booting, right? WRONG! 
 I dont know what the fuck i did, but on the second boot (the on after the tripple fault) it just magically works. HOW? I dont know. Ask a real
