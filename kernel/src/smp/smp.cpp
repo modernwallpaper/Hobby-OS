@@ -104,6 +104,7 @@ extern "C" void ap_entry(struct limine_mp_info* info)
 
 	interrupts::apic::apic.init(acpi::acpi.lapic_address);
 	interrupts::apic::apic.enable_x2apic();
+	interrupts::apic::apic.timer_periodic(1000, 48);
 
 #ifdef DEBUG
 	LOG("ap=%u; apic_id=0x%x; online=true", cpu_id,

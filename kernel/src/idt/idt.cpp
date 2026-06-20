@@ -1,6 +1,7 @@
 #include <apic/apic.hpp>
 #include <idt/idt.hpp>
 #include <logging/logger.hpp>
+#include <sched/sched.hpp>
 
 namespace interrupts
 {
@@ -44,6 +45,7 @@ extern "C" void isr30(void);
 extern "C" void isr31(void);
 extern "C" void isr_unhandled(void);
 extern "C" void lapic_timer_stub(void);
+extern "C" void yield_stub(void);
 
 static void (*isr_table[32])(void) = {
     isr0,  isr1,  isr2,	 isr3,	isr4,  isr5,  isr6,  isr7,  isr8,  isr9,  isr10,
@@ -71,12 +73,6 @@ static void (*irq_table[16])(void) = {irq0,  irq1,  irq2,  irq3, irq4,	irq5,
 				      irq6,  irq7,  irq8,  irq9, irq10, irq11,
 				      irq12, irq13, irq14, irq15};
 
-void lapic_timer_handler(frame* frame)
-{
-	apic::apic.eoi();
-	apic::apic.timer_oneshot_periodic_tick();
-}
-
 // main interrupt handler: dispatch exceptions and IRQs
 extern "C" frame* isr_handler(frame* frame)
 {
@@ -93,13 +89,21 @@ extern "C" frame* isr_handler(frame* frame)
 	}
 	else if (frame->vector == 48)
 	{
-		lapic_timer_handler(frame);
+		apic::apic.eoi();
+		apic::apic.timer_oneshot_periodic_tick();
+		return sched::scheduler.tick(frame);
+	}
+	else if (frame->vector == 0xFE)
+	{
+		return sched::scheduler.yield(frame);
 	}
 	else
 	{
 #ifdef DEBUG
-		LOG("unhandled_exception; rip=%x; rsp=%x; vector=%d; error=%x",
-		    frame->rip, frame->rsp, frame->vector, frame->error);
+		LOG("unhandled_exception; rip=%x; rsp=%x; vector=%d; error=%x; "
+		    "cs=%x; rflags=%x",
+		    frame->rip, frame->rsp, frame->vector, frame->error,
+		    frame->cs, frame->rflags);
 #endif
 	}
 	return frame;
@@ -130,6 +134,9 @@ void IDT::init(void)
 		if (i == 48)
 			this->set_gate(
 			    i, reinterpret_cast<void*>(lapic_timer_stub));
+		else if (i == 0xFE)
+			this->set_gate(i,
+				       reinterpret_cast<void*>(yield_stub));
 		else
 		{
 			this->set_gate(i,

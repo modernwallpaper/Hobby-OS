@@ -2,17 +2,25 @@
 
 #include <cstdint>
 #include <smp/smp.hpp>
+#include <sync/spinlock.hpp>
 
 #include "deadline.hpp"
-#include "eevdf.hpp"
 #include "idle.hpp"
+#include "round_robin.hpp"
 #include "realtime.hpp"
+
+namespace interrupts::idt
+{
+struct frame;
+} // namespace interrupts::idt
 
 namespace sched
 {
 
+static constexpr std::uint64_t DEFAULT_TIMESLICE = 5;
+
 enum class Policy : std::uint8_t {
-	EEVDF,
+	NORMAL,
 	DEADLINE,
 	REALTIME,
 	IDLE
@@ -31,21 +39,30 @@ struct thread {
 	std::uint64_t* rsp;
 	void* kernel_stack_base;
 	thread* next;
+	std::uint64_t remaining_ticks;
+	std::uint64_t cpu;
 };
 
 class Scheduler {
 private:
 	deadline::Deadline deadline_sched;
-	eevdf::Eevdf eevdf_sched;
+	round_robin::RoundRobin rr_sched;
 	idle::Idle idle_sched;
 	realtime::Realtime realtime_sched;
+
+	sync::IrqSpinlock lock;
+
+	thread* get_idle(void);
 
 public:
 	void init(void);
 	void enqueue(thread* t);
 	thread* pick_next(void);
-	void tick(void);
-	void yield(void);
+	interrupts::idt::frame* tick(interrupts::idt::frame* f);
+	interrupts::idt::frame* yield(interrupts::idt::frame* f);
+	static void yield(void);
+	thread* create_thread(void (*entry)(void), Policy policy,
+			      std::uint64_t cpu = 0);
 };
 
 extern Scheduler scheduler;

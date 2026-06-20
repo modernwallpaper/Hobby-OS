@@ -7,17 +7,20 @@ namespace sched
 
 struct thread;
 
-namespace deadline
+namespace round_robin
 {
 
-class Deadline {
+class RoundRobin {
+private:
+	thread* head;
+	thread* tail;
+
 public:
 	void init(void);
 	void enqueue(thread* t);
 	thread* pick_next(void);
-	thread* tick(thread* current);
 };
 
-} // namespace deadline
+} // namespace round_robin
 
 } // namespace sched

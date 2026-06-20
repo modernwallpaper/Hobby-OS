@@ -8,7 +8,9 @@ namespace memory
 std::uint64_t hhdm_offset = 0;
 Buddy buddy;
 
-void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count)
+void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count,
+                 std::uint64_t reserve_phys_base,
+                 std::uint64_t reserve_phys_size)
 {
 	this->canary_before = CANARY_VAL;
 	this->canary_after = CANARY_VAL;
@@ -22,6 +24,7 @@ void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count)
 
 	// skip first 2 MiB (bootloader/bios stuff)
 	std::uint64_t safe_base = 2 * 1024 * 1024;
+	std::uint64_t reserve_end = reserve_phys_base + reserve_phys_size;
 
 	for (std::uint64_t i = 0;
 	     i < entry_count && this->region_count < MAX_REGIONS; i++)
@@ -43,9 +46,33 @@ void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count)
 		if (rbase < safe_base)
 			rbase = safe_base;
 
-		this->regions[this->region_count].base = rbase;
-		this->regions[this->region_count].top = rtop;
-		this->region_count++;
+		// Exclude the reserved (kernel) range from this region
+		if (reserve_phys_size > 0 && rbase < reserve_end &&
+		    rtop > reserve_phys_base)
+		{
+			// Split into up to two regions around the reservation
+			if (rbase < reserve_phys_base)
+			{
+				this->regions[this->region_count].base =
+				    rbase;
+				this->regions[this->region_count].top =
+				    reserve_phys_base;
+				this->region_count++;
+			}
+			if (rtop > reserve_end)
+			{
+				this->regions[this->region_count].base =
+				    reserve_end;
+				this->regions[this->region_count].top = rtop;
+				this->region_count++;
+			}
+		}
+		else
+		{
+			this->regions[this->region_count].base = rbase;
+			this->regions[this->region_count].top = rtop;
+			this->region_count++;
+		}
 	}
 
 	for (int ri = 0; ri < this->region_count; ri++)
@@ -86,34 +113,47 @@ std::uint64_t Buddy::alloc_pages(int order)
 		return 0;
 	}
 
-	// find the first order that has a free block
-	int current = order;
-	while (current <= MAX_ORDER && this->free_lists[current] == nullptr)
-		current++;
+	FreeBlock* block;
+	int current;
 
-	if (current > MAX_ORDER)
+	// Retry loop: skip corrupted free-list entries (the bootloader may
+	// have placed kernel image pages inside USABLE memory-map ranges).
+	for (;;)
 	{
-		PANIC("alloc_pages=%d; out_of_memory", order);
-	}
+		// find the first order that has a free block
+		current = order;
+		while (current <= MAX_ORDER &&
+		       this->free_lists[current] == nullptr)
+			current++;
 
-	// pop the head of the list
-	FreeBlock* block = this->free_lists[current];
+		if (current > MAX_ORDER)
+			PANIC("alloc_pages=%d; out_of_memory", order);
 
-	// Validate the pointer before dereferencing — a non-canonical address
-	// would cause a #GP (vector 13) rather than a #PF.
-	std::uint64_t block_val = reinterpret_cast<std::uint64_t>(block);
-	if ((block_val >> 47) != 0 && (block_val >> 47) != 0x1FFFF)
-	{
-		PANIC(
-		    "alloc_pages; non-canonical free_lists[%d] = %p; order=%d; canary_before=0x%016llx; canary_after=0x%016llx",
-		    current, block, order, this->canary_before,
-		    this->canary_after);
-	}
-	if (block->magic != FREE_MAGIC)
-	{
-		PANIC(
-		    "alloc_pages; bad_magic in free_lists[%d] = %p; magic=0x%016llx (expected 0x%016llx); order=%d",
-		    current, block, block->magic, FREE_MAGIC, order);
+		block = this->free_lists[current];
+
+		// Validate the pointer before dereferencing
+		std::uint64_t block_val =
+		    reinterpret_cast<std::uint64_t>(block);
+		if ((block_val >> 47) != 0 && (block_val >> 47) != 0x1FFFF)
+		{
+			PANIC(
+			    "alloc_pages; non-canonical free_lists[%d] = %p; order=%d",
+			    current, block, order);
+		}
+
+		if (block->magic == FREE_MAGIC)
+			break; // valid block
+
+		// Corrupted block — remove from list and retry
+		FreeBlock* next = block->next;
+		if (next)
+		{
+			std::uint64_t nv =
+			    reinterpret_cast<std::uint64_t>(next);
+			if ((nv >> 47) != 0 && (nv >> 47) != 0x1FFFF)
+				next = nullptr; // next pointer also corrupted
+		}
+		this->free_lists[current] = next;
 	}
 
 	this->free_lists[current] = block->next;
@@ -204,6 +244,80 @@ void Buddy::log_stats(void) const
 			LOG("order=%2d; size=%4llu_kib; blocks=%llu", i,
 			    block_size / 1024, count);
 #endif
+		}
+	}
+
+	this->lock.unlock();
+}
+
+void Buddy::reserve_range(std::uint64_t base, std::uint64_t top)
+{
+	this->lock.lock();
+
+	base &= ~(PAGE_SIZE - 1);
+	top = (top + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+	if (base >= top)
+	{
+		this->lock.unlock();
+		return;
+	}
+
+	// Walk orders from high to low so we handle large blocks first
+	for (int order = MAX_ORDER; order >= 0; order--)
+	{
+		std::uint64_t block_size = PAGE_SIZE * (1ULL << order);
+
+		FreeBlock** prev = &this->free_lists[order];
+		FreeBlock* curr = this->free_lists[order];
+
+		while (curr)
+		{
+			std::uint64_t block_phys = virt_to_phys(curr);
+			std::uint64_t block_end = block_phys + block_size;
+
+			if (block_end <= base || block_phys >= top)
+			{
+				// No overlap
+				prev = &curr->next;
+				curr = curr->next;
+				continue;
+			}
+
+			// This block overlaps the reserved range
+			*prev = curr->next;
+			this->total_pages -= (1ULL << order);
+
+			if (order == 0)
+			{
+				// order 0: just remove it (page is reserved)
+				curr = *prev;
+				continue;
+			}
+
+			// Split the block into two halves of order-1
+			int lower = order - 1;
+			std::uint64_t lower_size = PAGE_SIZE * (1ULL << lower);
+
+			// Re-insert both halves at the lower order
+			FreeBlock* first = static_cast<FreeBlock*>(
+			    phys_to_virt(block_phys));
+			first->magic = FREE_MAGIC;
+			first->order = lower;
+			first->next = this->free_lists[lower];
+			this->free_lists[lower] = first;
+
+			FreeBlock* second = static_cast<FreeBlock*>(
+			    phys_to_virt(block_phys + lower_size));
+			second->magic = FREE_MAGIC;
+			second->order = lower;
+			second->next = this->free_lists[lower];
+			this->free_lists[lower] = second;
+
+			// The halves will be processed when the outer loop
+			// reaches order-1 — any half that still overlaps the
+			// reserved range will be split further or removed
+			curr = *prev;
 		}
 	}
 

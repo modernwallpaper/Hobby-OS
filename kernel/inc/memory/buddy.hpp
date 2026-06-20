@@ -70,9 +70,12 @@ private:
 	void insert_range(std::uint64_t base, std::uint64_t top);
 
 public:
-	void init(limine_memmap_entry** entries, std::uint64_t entry_count);
+	void init(limine_memmap_entry** entries, std::uint64_t entry_count,
+	          std::uint64_t reserve_phys_base = 0,
+	          std::uint64_t reserve_phys_size = 0);
 	std::uint64_t alloc_pages(int order);
 	void free_page(std::uint64_t addr, int order);
+	void reserve_range(std::uint64_t base, std::uint64_t top);
 	void log_stats(void) const;
 };
 
