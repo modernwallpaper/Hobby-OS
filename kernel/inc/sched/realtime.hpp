@@ -11,6 +11,10 @@ namespace realtime
 {
 
 class Realtime {
+private:
+	thread* head;
+	thread* tail;
+
 public:
 	void init(void);
 	void enqueue(thread* t);

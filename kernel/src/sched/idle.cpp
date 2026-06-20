@@ -32,6 +32,8 @@ void Idle::init(void)
 		std::uint64_t* sp =
 		    reinterpret_cast<std::uint64_t*>(stack_top);
 
+		*--sp = 0x10;
+		*--sp = stack_top;
 		*--sp = 0x202;
 		*--sp = 0x08;
 		*--sp = reinterpret_cast<std::uint64_t>(::idle_loop);

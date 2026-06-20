@@ -41,6 +41,7 @@ struct thread {
 	thread* next;
 	std::uint64_t remaining_ticks;
 	std::uint64_t cpu;
+	std::uint64_t deadline;
 };
 
 class Scheduler {
@@ -62,7 +63,8 @@ public:
 	interrupts::idt::frame* yield(interrupts::idt::frame* f);
 	static void yield(void);
 	thread* create_thread(void (*entry)(void), Policy policy,
-			      std::uint64_t cpu = 0);
+			      std::uint64_t cpu = 0,
+			      std::uint64_t deadline = 0);
 };
 
 extern Scheduler scheduler;

@@ -135,8 +135,7 @@ void IDT::init(void)
 			this->set_gate(
 			    i, reinterpret_cast<void*>(lapic_timer_stub));
 		else if (i == 0xFE)
-			this->set_gate(i,
-				       reinterpret_cast<void*>(yield_stub));
+			this->set_gate(i, reinterpret_cast<void*>(yield_stub));
 		else
 		{
 			this->set_gate(i,

@@ -230,6 +230,7 @@ static void test_a(void)
 		sched::scheduler.yield();
 	}
 	LOG("test_a: done");
+	sched::current_thread()->state = sched::TaskState::DEAD;
 	for (;;)
 		asm("hlt");
 }
@@ -242,6 +243,20 @@ static void test_b(void)
 		sched::scheduler.yield();
 	}
 	LOG("test_b: done");
+	sched::current_thread()->state = sched::TaskState::DEAD;
+	for (;;)
+		asm("hlt");
+}
+
+static void test_c(void)
+{
+	for (int i = 0; i < 3; i++)
+	{
+		LOG("test_c: iteration %d", i);
+		sched::scheduler.yield();
+	}
+	LOG("test_c: done");
+	sched::current_thread()->state = sched::TaskState::DEAD;
 	for (;;)
 		asm("hlt");
 }
@@ -341,6 +356,7 @@ extern "C" void kmain(void)
 	smp::wake_aps(mp_request.response);
 
 	interrupts::apic::apic.enable_x2apic();
+	interrupts::apic::apic.timer_periodic(1000, 48);
 
 	tsc::tsc.init();
 
@@ -355,8 +371,12 @@ extern "C" void kmain(void)
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 
 	LOG("creating test threads");
-	sched::scheduler.create_thread(test_a, sched::Policy::NORMAL);
-	sched::scheduler.create_thread(test_b, sched::Policy::NORMAL);
+	auto ta = sched::scheduler.create_thread(test_a, sched::Policy::REALTIME);
+	auto tb = sched::scheduler.create_thread(test_b, sched::Policy::DEADLINE, 0, 50);
+	auto tc = sched::scheduler.create_thread(test_c, sched::Policy::NORMAL);
+	LOG("threads: ta=%p(state=%d) tb=%p(state=%d) tc=%p(state=%d)",
+	    (void*)ta, (int)ta->state, (void*)tb, (int)tb->state,
+	    (void*)tc, (int)tc->state);
 	LOG("test threads created, yielding");
 
 	asm("sti");

@@ -15,15 +15,15 @@ Scheduler scheduler;
 
 void Scheduler::init(void)
 {
-	rr_sched.init();
-	deadline_sched.init();
-	realtime_sched.init();
-	idle_sched.init();
+	this->rr_sched.init();
+	this->deadline_sched.init();
+	this->realtime_sched.init();
+	this->idle_sched.init();
 
 	smp::cpu_info* bsp = smp::this_cpu();
 
-	thread* initial = static_cast<thread*>(
-	    memory::slub.kmalloc(sizeof(thread)));
+	thread* initial =
+	    static_cast<thread*>(memory::slub.kmalloc(sizeof(thread)));
 	if (!initial)
 		PANIC("sched_init: kmalloc failed");
 
@@ -59,8 +59,10 @@ void Scheduler::enqueue(thread* t)
 	switch (t->policy)
 	{
 	case Policy::REALTIME:
+		this->realtime_sched.enqueue(t);
+		break;
 	case Policy::DEADLINE:
-		this->rr_sched.enqueue(t);
+		this->deadline_sched.enqueue(t);
 		break;
 	case Policy::NORMAL:
 		this->rr_sched.enqueue(t);
@@ -109,7 +111,8 @@ interrupts::idt::frame* Scheduler::tick(interrupts::idt::frame* f)
 
 	if (current->remaining_ticks == 0)
 	{
-		if (current->policy != Policy::IDLE)
+		if (current->policy != Policy::IDLE &&
+		    current->state != TaskState::DEAD)
 		{
 			current->remaining_ticks = DEFAULT_TIMESLICE;
 			this->enqueue(current);
@@ -149,7 +152,8 @@ interrupts::idt::frame* Scheduler::yield(interrupts::idt::frame* f)
 
 	current->rsp = reinterpret_cast<std::uint64_t*>(f);
 
-	if (current->policy != Policy::IDLE)
+	if (current->policy != Policy::IDLE &&
+	    current->state != TaskState::DEAD)
 	{
 		current->remaining_ticks = DEFAULT_TIMESLICE;
 		this->enqueue(current);
@@ -180,7 +184,7 @@ void Scheduler::yield(void)
 }
 
 thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
-				 std::uint64_t cpu)
+				 std::uint64_t cpu, std::uint64_t deadline)
 {
 	std::uint64_t stack_phys = memory::buddy.alloc_pages(1);
 	if (!stack_phys)
@@ -190,18 +194,17 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	std::uint64_t stack_top = reinterpret_cast<std::uint64_t>(stack) + 8192;
 	std::uint64_t* sp = reinterpret_cast<std::uint64_t*>(stack_top);
 
-	*--sp = 0x10;				   // SS (kernel data segment)
+	*--sp = 0x10; // SS (kernel data segment)
 	*--sp = reinterpret_cast<std::uint64_t>(stack_top); // RSP
-	*--sp = 0x202;					   // RFLAGS
-	*--sp = 0x08;					   // CS
-	*--sp = reinterpret_cast<std::uint64_t>(entry);	   // RIP
-	*--sp = 0;					   // error code
-	*--sp = 0xFF;					   // vector
+	*--sp = 0x202;					    // RFLAGS
+	*--sp = 0x08;					    // CS
+	*--sp = reinterpret_cast<std::uint64_t>(entry);	    // RIP
+	*--sp = 0;					    // error code
+	*--sp = 0xFF;					    // vector
 	for (int i = 0; i < 15; i++)
 		*--sp = 0;
 
-	thread* t = static_cast<thread*>(
-	    memory::slub.kmalloc(sizeof(thread)));
+	thread* t = static_cast<thread*>(memory::slub.kmalloc(sizeof(thread)));
 	if (!t)
 		PANIC("create_thread: kmalloc failed");
 
@@ -212,6 +215,7 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	t->next = nullptr;
 	t->remaining_ticks = DEFAULT_TIMESLICE;
 	t->cpu = cpu;
+	t->deadline = deadline;
 
 	std::uint64_t flags;
 	this->lock.lock_save(flags);

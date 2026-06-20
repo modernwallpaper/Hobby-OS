@@ -8,22 +8,39 @@ namespace deadline
 
 void Deadline::init(void)
 {
+	this->head = nullptr;
 }
 
 void Deadline::enqueue(thread* t)
 {
-	(void)t;
+	t->next = nullptr;
+
+	if (!this->head || t->deadline < this->head->deadline)
+	{
+		t->next = this->head;
+		this->head = t;
+		return;
+	}
+
+	thread* prev = this->head;
+	while (prev->next && prev->next->deadline <= t->deadline)
+		prev = prev->next;
+
+	t->next = prev->next;
+	prev->next = t;
 }
 
 thread* Deadline::pick_next(void)
 {
-	return nullptr;
-}
+	thread* t = this->head;
 
-thread* Deadline::tick(thread* current)
-{
-	(void)current;
-	return nullptr;
+	if (!t)
+		return nullptr;
+
+	this->head = t->next;
+	t->next = nullptr;
+
+	return t;
 }
 
 } // namespace deadline

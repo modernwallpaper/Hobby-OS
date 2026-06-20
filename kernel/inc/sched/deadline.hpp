@@ -11,11 +11,13 @@ namespace deadline
 {
 
 class Deadline {
+private:
+	thread* head;
+
 public:
 	void init(void);
 	void enqueue(thread* t);
 	thread* pick_next(void);
-	thread* tick(thread* current);
 };
 
 } // namespace deadline
