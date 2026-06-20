@@ -24,6 +24,7 @@ struct cpu_info {
 	bool bsp;
 	bool startup_failed;
 	std::uint64_t stack_base;
+	void* current_thread;
 	void* tss;
 };
 
