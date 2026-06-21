@@ -65,35 +65,32 @@ void IOAPIC::init(std::uint32_t base_phys)
 // mask (disable) a specific IRQ pin
 void IOAPIC::mask_irq(std::uint8_t irq)
 {
-	std::uint8_t index =
-	    static_cast<std::uint8_t>(this->REG_IOREDTBL_BASE + irq * 2);
-	std::uint32_t low = this->read_register(index);
+	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
+	std::uint32_t low = this->read_register(static_cast<std::uint8_t>(index));
 	low |= (1 << 16);
-	this->write_register(index, low);
+	this->write_register(static_cast<std::uint8_t>(index), low);
 }
 
 // unmask (enable) a specific IRQ pin
 void IOAPIC::unmask_irq(std::uint8_t irq)
 {
-	std::uint8_t index =
-	    static_cast<std::uint8_t>(this->REG_IOREDTBL_BASE + irq * 2);
-	std::uint32_t low = this->read_register(index);
+	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
+	std::uint32_t low = this->read_register(static_cast<std::uint8_t>(index));
 	low &= ~(1 << 16);
-	this->write_register(index, low);
+	this->write_register(static_cast<std::uint8_t>(index), low);
 }
 
 // route an IRQ pin to a specific APIC and interrupt vector
 void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
 			  std::uint8_t apic_id)
 {
-	std::uint8_t index =
-	    static_cast<std::uint8_t>(this->REG_IOREDTBL_BASE + irq * 2);
+	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
 
 	std::uint32_t low = vector;
 
 	std::uint32_t high = static_cast<std::uint32_t>(apic_id) << 24;
 
-	this->write_register(index, low);
+	this->write_register(static_cast<std::uint8_t>(index), low);
 	this->write_register(static_cast<std::uint8_t>(index + 1), high);
 
 #ifdef DEBUG

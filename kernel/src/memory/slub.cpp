@@ -1,7 +1,7 @@
 #include <logging/logger.hpp>
-#include <panic/panic.hpp>
 #include <memory/buddy.hpp>
 #include <memory/slub.hpp>
+#include <panic/panic.hpp>
 
 namespace memory
 {
@@ -25,7 +25,7 @@ Slab* SlubAllocator::slab_from_ptr(void* ptr)
 
 	if (slab->slab_magic != SLAB_MAGIC)
 	{
-		PANIC("kfree; bad_magic; slab=%p; ptr=%p", slab, ptr);
+		PANIC("bad_magic; slab=%p; ptr=%p", slab, ptr);
 	}
 	return slab;
 }
@@ -188,7 +188,8 @@ void* SlubAllocator::kmalloc(std::uint64_t size)
 	if (!obj)
 	{
 #ifdef DEBUG
-		LOG("kmalloc=%llu; slab_corrupted; free_list=null; allocating_new_slab",
+		LOG("kmalloc=%llu; slab_corrupted; free_list=null; "
+		    "allocating_new_slab",
 		    size);
 #endif
 		slab = this->slab_alloc_new(cache);

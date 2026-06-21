@@ -63,6 +63,9 @@ void TSC::calibrate(void)
 	std::uint64_t hpet_hz = timers::hpet::hpet.get_freq();
 	std::uint64_t hpet_target = hpet_hz / 1000;
 
+	std::uint64_t flags;
+	__asm__ volatile("pushfq; pop %0; cli" : "=r"(flags)::"memory");
+
 	std::uint64_t hpet_start = timers::hpet::hpet.read_counter();
 	std::uint64_t tsc_start =
 	    this->supports_rdtscp ? this->rdtscp() : this->rdtsc();
@@ -75,6 +78,9 @@ void TSC::calibrate(void)
 	std::uint64_t tsc_end =
 	    this->supports_rdtscp ? this->rdtscp() : this->rdtsc();
 	std::uint64_t hpet_end = timers::hpet::hpet.read_counter();
+
+	if (flags & 0x200)
+		__asm__ volatile("sti");
 
 	std::uint64_t tsc_delta = tsc_end - tsc_start;
 	std::uint64_t hpet_delta = hpet_end - hpet_start;

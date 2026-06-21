@@ -51,12 +51,10 @@ __attribute__((
 
 __attribute__((
     used,
-    section(
-	".limine_requests"))) volatile limine_executable_address_request
-    exec_addr_request = {
-	.id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
-	.revision = 0,
-	.response = nullptr};
+    section(".limine_requests"))) volatile limine_executable_address_request
+    exec_addr_request = {.id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
+			 .revision = 0,
+			 .response = nullptr};
 
 } // namespace
 
@@ -82,8 +80,8 @@ static void reserve_kernel_pages(void)
 	// when the bootloader scatters kernel BSS pages across USABLE regions.
 	std::uint64_t cr3;
 	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-	auto* pml4 = static_cast<std::uint64_t*>(
-	    memory::phys_to_virt(cr3 & ~0xFFFULL));
+	auto* pml4 =
+	    static_cast<std::uint64_t*>(memory::phys_to_virt(cr3 & ~0xFFFULL));
 
 	std::uint64_t total_reserved = 0;
 
@@ -132,8 +130,7 @@ static void reserve_kernel_pages(void)
 				}
 
 				auto* pt = static_cast<std::uint64_t*>(
-				    memory::phys_to_virt(pd[pdi] &
-							 ~0xFFFULL));
+				    memory::phys_to_virt(pd[pdi] & ~0xFFFULL));
 
 				// Reserve contiguous runs of 4K pages
 				std::uint64_t run_start = 0;
@@ -144,8 +141,8 @@ static void reserve_kernel_pages(void)
 					{
 						if (run_end > run_start)
 						{
-							memory::buddy.
-							    reserve_range(
+							memory::buddy
+							    .reserve_range(
 								run_start,
 								run_end);
 							total_reserved +=
@@ -171,9 +168,8 @@ static void reserve_kernel_pages(void)
 					}
 					else
 					{
-						memory::buddy.
-						    reserve_range(run_start,
-								  run_end);
+						memory::buddy.reserve_range(
+						    run_start, run_end);
 						total_reserved +=
 						    (run_end - run_start) /
 						    4096;
@@ -183,10 +179,10 @@ static void reserve_kernel_pages(void)
 				}
 				if (run_end > run_start)
 				{
-					memory::buddy.reserve_range(
-					    run_start, run_end);
-					total_reserved += (run_end - run_start) /
-					                  4096;
+					memory::buddy.reserve_range(run_start,
+								    run_end);
+					total_reserved +=
+					    (run_end - run_start) / 4096;
 				}
 			}
 		}
@@ -222,45 +218,6 @@ void* __dso_handle;
 extern void (*__init_array[])(void);
 extern void (*__init_array_end[])(void);
 
-static void test_a(void)
-{
-	for (int i = 0; i < 3; i++)
-	{
-		LOG("test_a: iteration %d", i);
-		sched::scheduler.yield();
-	}
-	LOG("test_a: done");
-	sched::current_thread()->state = sched::TaskState::DEAD;
-	for (;;)
-		asm("hlt");
-}
-
-static void test_b(void)
-{
-	for (int i = 0; i < 3; i++)
-	{
-		LOG("test_b: iteration %d", i);
-		sched::scheduler.yield();
-	}
-	LOG("test_b: done");
-	sched::current_thread()->state = sched::TaskState::DEAD;
-	for (;;)
-		asm("hlt");
-}
-
-static void test_c(void)
-{
-	for (int i = 0; i < 3; i++)
-	{
-		LOG("test_c: iteration %d", i);
-		sched::scheduler.yield();
-	}
-	LOG("test_c: done");
-	sched::current_thread()->state = sched::TaskState::DEAD;
-	for (;;)
-		asm("hlt");
-}
-
 extern "C" void kmain(void)
 {
 	smp::sse_enable();
@@ -287,6 +244,8 @@ extern "C" void kmain(void)
 		PANIC("rsdp_request.response=nullptr");
 	if (mp_request.response == nullptr)
 		PANIC("mp_request.response=nullptr");
+	if (exec_addr_request.response == nullptr)
+		PANIC("exec_addr_request.response=nullptr");
 
 	// memory
 
@@ -295,19 +254,14 @@ extern "C" void kmain(void)
 	LOG("hhdm_offset=0x%016llx", memory::hhdm_offset);
 #endif
 	std::uint64_t kernel_phys = 0;
-	if (exec_addr_request.response)
-	{
-		kernel_phys = exec_addr_request.response->physical_base;
-		LOG("kernel_phys=0x%016llx", kernel_phys);
-	}
-	else
-		LOG("exec_addr_request.response=nullptr");
+	kernel_phys = exec_addr_request.response->physical_base;
+#ifdef DEBUG
+	LOG("kernel_phys=0x%016llx", kernel_phys);
+#endif
 
-	// kernel virtual image spans 0xffffffff80000000 .. 0xffffffff8004D938
-	// -> physical size = 0x4E000 bytes (rounded up to page boundary)
 	memory::buddy.init(memmap_request.response->entries,
-			   memmap_request.response->entry_count,
-			   kernel_phys, kernel_phys ? 0x4E000ULL : 0);
+			   memmap_request.response->entry_count, kernel_phys,
+			   kernel_phys ? 0x4E000ULL : 0);
 
 	reserve_kernel_pages();
 
@@ -370,23 +324,7 @@ extern "C" void kmain(void)
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
 
-	LOG("creating test threads");
-	auto ta = sched::scheduler.create_thread(test_a, sched::Policy::REALTIME);
-	auto tb = sched::scheduler.create_thread(test_b, sched::Policy::DEADLINE, 0, 50);
-	auto tc = sched::scheduler.create_thread(test_c, sched::Policy::NORMAL);
-	LOG("threads: ta=%p(state=%d) tb=%p(state=%d) tc=%p(state=%d)",
-	    (void*)ta, (int)ta->state, (void*)tb, (int)tb->state,
-	    (void*)tc, (int)tc->state);
-	LOG("test threads created, yielding");
-
 	asm("sti");
 
-	for (int i = 0; i < 3; i++)
-	{
-		LOG("main: iteration %d", i);
-		sched::scheduler.yield();
-	}
-	LOG("main: done");
-	for (;;)
-		asm("hlt");
+	hcf();
 }

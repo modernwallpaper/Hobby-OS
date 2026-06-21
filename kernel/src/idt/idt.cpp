@@ -81,7 +81,9 @@ extern "C" frame* isr_handler(frame* frame)
 	// #endif
 	if (frame->vector == 0)
 	{
-		frame->rip += 2;
+#ifdef DEBUG
+		LOG("divide_by_zero; rip=%x", frame->rip);
+#endif
 	}
 	else if (frame->vector >= 32 && frame->vector <= 47)
 	{

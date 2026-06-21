@@ -9,8 +9,8 @@ std::uint64_t hhdm_offset = 0;
 Buddy buddy;
 
 void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count,
-                 std::uint64_t reserve_phys_base,
-                 std::uint64_t reserve_phys_size)
+		 std::uint64_t reserve_phys_base,
+		 std::uint64_t reserve_phys_size)
 {
 	this->canary_before = CANARY_VAL;
 	this->canary_after = CANARY_VAL;
@@ -53,8 +53,7 @@ void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count,
 			// Split into up to two regions around the reservation
 			if (rbase < reserve_phys_base)
 			{
-				this->regions[this->region_count].base =
-				    rbase;
+				this->regions[this->region_count].base = rbase;
 				this->regions[this->region_count].top =
 				    reserve_phys_base;
 				this->region_count++;
@@ -102,9 +101,9 @@ std::uint64_t Buddy::alloc_pages(int order)
 	if (this->canary_before != CANARY_VAL ||
 	    this->canary_after != CANARY_VAL)
 	{
-		PANIC(
-		    "buddy_canary_corrupted; before=0x%016llx; after=0x%016llx; order=%d",
-		    this->canary_before, this->canary_after, order);
+		PANIC("buddy_canary_corrupted; before=0x%016llx; "
+		      "after=0x%016llx; order=%d",
+		      this->canary_before, this->canary_after, order);
 	}
 
 	if (order < 0 || order > MAX_ORDER)
@@ -136,9 +135,9 @@ std::uint64_t Buddy::alloc_pages(int order)
 		    reinterpret_cast<std::uint64_t>(block);
 		if ((block_val >> 47) != 0 && (block_val >> 47) != 0x1FFFF)
 		{
-			PANIC(
-			    "alloc_pages; non-canonical free_lists[%d] = %p; order=%d",
-			    current, block, order);
+			PANIC("non-canonical free_lists[%d] = %p; "
+			      "order=%d",
+			      current, block, order);
 		}
 
 		if (block->magic == FREE_MAGIC)
@@ -193,7 +192,7 @@ void Buddy::free_page(std::uint64_t addr, int order)
 	}
 	if ((addr & (PAGE_SIZE - 1)) != 0)
 	{
-		PANIC("free_page; misaligned_addr=0x%016llx", addr);
+		PANIC("misaligned_addr=0x%016llx", addr);
 	}
 
 	std::uint64_t phys = addr;
@@ -300,8 +299,8 @@ void Buddy::reserve_range(std::uint64_t base, std::uint64_t top)
 			std::uint64_t lower_size = PAGE_SIZE * (1ULL << lower);
 
 			// Re-insert both halves at the lower order
-			FreeBlock* first = static_cast<FreeBlock*>(
-			    phys_to_virt(block_phys));
+			FreeBlock* first =
+			    static_cast<FreeBlock*>(phys_to_virt(block_phys));
 			first->magic = FREE_MAGIC;
 			first->order = lower;
 			first->next = this->free_lists[lower];

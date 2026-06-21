@@ -50,8 +50,7 @@ void* memmove(void* dest, const void* src, std::size_t n)
 			pdest[i] = psrc[i];
 		}
 	}
-	else if (reinterpret_cast<std::uintptr_t>(src) <
-		 reinterpret_cast<std::uintptr_t>(dest))
+	else
 	{
 		for (std::size_t i = n; i > 0; i--)
 		{

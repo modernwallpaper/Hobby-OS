@@ -78,6 +78,18 @@ static void ap_setup_gdt_tss(gdt::entry* gdt, gdt::tss* tss,
 	tss->io_map_base = sizeof(gdt::tss);
 	tss->rsp0 = stack_top;
 
+	static constexpr std::uint64_t IST_STACK_SIZE = 4096;
+	auto alloc_ist = [](std::uint64_t size) -> std::uint64_t {
+		std::uint64_t phys = memory::buddy.alloc_pages(
+		    size == 4096 ? 0 : 1);
+		return reinterpret_cast<std::uint64_t>(
+		       memory::phys_to_virt(phys)) + size;
+	};
+	tss->ist1 = alloc_ist(IST_STACK_SIZE);
+	tss->ist2 = alloc_ist(IST_STACK_SIZE);
+	tss->ist3 = alloc_ist(IST_STACK_SIZE);
+	tss->ist4 = alloc_ist(IST_STACK_SIZE);
+
 	gdt::ptr gdt_ptr;
 	gdt_ptr.limit = 7 * sizeof(gdt::entry) - 1;
 	gdt_ptr.base = reinterpret_cast<std::uint64_t>(gdt);
@@ -123,6 +135,10 @@ void wake_aps(struct limine_mp_response* mp)
 	{
 		PANIC("mp_response=nullptr");
 	}
+
+	if (mp->cpu_count > MAX_CPUS)
+		PANIC("cpu_count=%llu > MAX_CPUS=%llu", mp->cpu_count,
+		      MAX_CPUS);
 
 	cpu_count = mp->cpu_count;
 
