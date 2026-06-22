@@ -13,7 +13,9 @@ void TSC::init(void)
 {
 	if (!this->verify())
 	{
+#ifdef DEBUG
 		LOG("warning: invariant TSC leaf not set, proceeding anyway");
+#endif
 	}
 
 	this->calibrate();
