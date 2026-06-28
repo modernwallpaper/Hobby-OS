@@ -193,6 +193,14 @@ static void reserve_kernel_pages(void)
 #endif
 }
 
+static std::uint8_t* alloc_boot_pages(int order, const char* name)
+{
+	std::uint64_t phys = memory::buddy.alloc_pages(order);
+	if (!phys)
+		PANIC("failed_to_alloc_%s", name);
+	return static_cast<std::uint8_t*>(memory::phys_to_virt(phys));
+}
+
 void hcf(void)
 {
 	for (;;)
@@ -270,18 +278,14 @@ extern "C" void kmain(void)
 	// gdt/idt
 
 	static constexpr std::uint64_t KERNEL_STACK_SIZE = 16384;
-	std::uint8_t* kernel_stack = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(memory::buddy.alloc_pages(2)));
+	std::uint8_t* kernel_stack =
+	    alloc_boot_pages(2, "kernel_stack");
 
 	static constexpr std::uint64_t IST_STACK_SIZE = 4096;
-	std::uint8_t* ist1_stack = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(memory::buddy.alloc_pages(0)));
-	std::uint8_t* ist2_stack = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(memory::buddy.alloc_pages(0)));
-	std::uint8_t* ist3_stack = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(memory::buddy.alloc_pages(0)));
-	std::uint8_t* ist4_stack = static_cast<std::uint8_t*>(
-	    memory::phys_to_virt(memory::buddy.alloc_pages(0)));
+	std::uint8_t* ist1_stack = alloc_boot_pages(0, "ist1_stack");
+	std::uint8_t* ist2_stack = alloc_boot_pages(0, "ist2_stack");
+	std::uint8_t* ist3_stack = alloc_boot_pages(0, "ist3_stack");
+	std::uint8_t* ist4_stack = alloc_boot_pages(0, "ist4_stack");
 
 	gdt::gdt.init(KERNEL_STACK_SIZE, kernel_stack, IST_STACK_SIZE,
 		      ist1_stack, ist2_stack, ist3_stack, ist4_stack);

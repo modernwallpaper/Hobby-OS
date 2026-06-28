@@ -1,6 +1,7 @@
 #include <memory/buddy.hpp>
 #include <memory/paging.hpp>
 #include <logging/logger.hpp>
+#include <panic/panic.hpp>
 
 namespace memory
 {
@@ -20,6 +21,8 @@ static std::uint64_t* walk_level(std::uint64_t* table, int idx)
 	if ((table[idx] & 1) == 0)
 	{
 		std::uint64_t new_page = buddy.alloc_pages(0);
+		if (!new_page)
+			PANIC("map_mmio_page: failed to allocate page table");
 		std::uint64_t* new_table =
 		    static_cast<std::uint64_t*>(phys_to_virt(new_page));
 		for (int i = 0; i < 512; i++)

@@ -64,6 +64,7 @@ private:
 	int region_count;		// Number of valid entries in regions[]
 	MemRegion regions[MAX_REGIONS]; // usable memory regions discovered
 					// during init
+	bool add_region(std::uint64_t base, std::uint64_t top);
 	bool addr_is_usable(std::uint64_t phys) const;
 	bool is_buddy_free(std::uint64_t phys, int order) const;
 	void list_remove(std::uint64_t phys, int order);

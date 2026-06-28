@@ -15,7 +15,7 @@ namespace pic
 #define PIC2_COMMAND PIC2
 #define PIC2_DATA (PIC2 + 1)
 
-static void disable_pic(void)
+static inline void disable_pic(void)
 {
 	ports::outb(PIC1_DATA, 0xFF);
 	ports::outb(PIC2_DATA, 0xFF);

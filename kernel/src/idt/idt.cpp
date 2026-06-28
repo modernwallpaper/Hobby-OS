@@ -114,6 +114,7 @@ extern "C" frame* isr_handler(frame* frame)
 // IRQ handler: send EOI to the APIC
 extern "C" void irq_handler(frame* frame)
 {
+	(void)frame;
 	// #ifdef DEBUG
 	// 	std::uint8_t irq = frame->vector - 32;
 	// 	LOG("irq=%x", irq);

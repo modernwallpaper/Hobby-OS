@@ -8,6 +8,20 @@ namespace memory
 std::uint64_t hhdm_offset = 0;
 Buddy buddy;
 
+bool Buddy::add_region(std::uint64_t base, std::uint64_t top)
+{
+	if (base >= top)
+		return true;
+
+	if (this->region_count >= MAX_REGIONS)
+		return false;
+
+	this->regions[this->region_count].base = base;
+	this->regions[this->region_count].top = top;
+	this->region_count++;
+	return true;
+}
+
 void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count,
 		 std::uint64_t reserve_phys_base,
 		 std::uint64_t reserve_phys_size)
@@ -53,24 +67,19 @@ void Buddy::init(limine_memmap_entry** entries, std::uint64_t entry_count,
 			// Split into up to two regions around the reservation
 			if (rbase < reserve_phys_base)
 			{
-				this->regions[this->region_count].base = rbase;
-				this->regions[this->region_count].top =
-				    reserve_phys_base;
-				this->region_count++;
+				if (!this->add_region(rbase, reserve_phys_base))
+					PANIC("too_many_memory_regions");
 			}
 			if (rtop > reserve_end)
 			{
-				this->regions[this->region_count].base =
-				    reserve_end;
-				this->regions[this->region_count].top = rtop;
-				this->region_count++;
+				if (!this->add_region(reserve_end, rtop))
+					PANIC("too_many_memory_regions");
 			}
 		}
 		else
 		{
-			this->regions[this->region_count].base = rbase;
-			this->regions[this->region_count].top = rtop;
-			this->region_count++;
+			if (!this->add_region(rbase, rtop))
+				PANIC("too_many_memory_regions");
 		}
 	}
 
