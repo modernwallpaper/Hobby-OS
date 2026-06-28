@@ -11,6 +11,7 @@
 #include <memory/buddy.hpp>
 #include <memory/slub.hpp>
 #include <panic/panic.hpp>
+#include <pci/pci.hpp>
 #include <pic/pic.hpp>
 #include <ports/ports.hpp>
 #include <sched/sched.hpp>
@@ -278,8 +279,7 @@ extern "C" void kmain(void)
 	// gdt/idt
 
 	static constexpr std::uint64_t KERNEL_STACK_SIZE = 16384;
-	std::uint8_t* kernel_stack =
-	    alloc_boot_pages(2, "kernel_stack");
+	std::uint8_t* kernel_stack = alloc_boot_pages(2, "kernel_stack");
 
 	static constexpr std::uint64_t IST_STACK_SIZE = 4096;
 	std::uint8_t* ist1_stack = alloc_boot_pages(0, "ist1_stack");
@@ -320,6 +320,8 @@ extern "C" void kmain(void)
 	tsc::tsc.init();
 
 	sched::scheduler.init();
+
+	pci::pci.init();
 
 	auto boot_end_ticks = timers::hpet::hpet.read_counter();
 	auto elapsed_ticks = boot_end_ticks - boot_start_ticks;

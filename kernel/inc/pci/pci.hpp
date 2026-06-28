@@ -45,12 +45,59 @@ namespace pci
 
 #define PCI_MAX_DEVICES 256
 
+struct device {
+	std::uint8_t bus;
+	std::uint8_t slot;
+	std::uint8_t func;
+	std::uint16_t vendor_id;
+	std::uint16_t device_id;
+	std::uint8_t class_code;
+	std::uint8_t subclass;
+	std::uint8_t prog_if;
+	std::uint8_t header_type;
+};
+
 class Pci {
-private:
-	std::uint32_t read_config(std::uint8_t bus, std::uint8_t slot,
-				  std::uint8_t func, std::uint8_t offset);
+	int num_devices;
+	device devices[PCI_MAX_DEVICES];
+
+	void check_bus(std::uint8_t bus);
+	void check_device(std::uint8_t bus, std::uint8_t slot);
+	void check_function(std::uint8_t bus, std::uint8_t slot,
+			    std::uint8_t func);
 
 public:
+	void init(void);
+	void enumerate(void);
+	std::uint32_t read_config(std::uint8_t bus, std::uint8_t slot,
+				  std::uint8_t func, std::uint8_t offset);
+	void write_config(std::uint8_t bus, std::uint8_t slot,
+			  std::uint8_t func, std::uint8_t offset,
+			  std::uint32_t value);
+
+	std::uint16_t read_vendor(std::uint8_t bus, std::uint8_t slot,
+				  std::uint8_t func);
+	std::uint16_t read_device_id(std::uint8_t bus, std::uint8_t slot,
+				     std::uint8_t func);
+	std::uint8_t read_class(std::uint8_t bus, std::uint8_t slot,
+				std::uint8_t func);
+	std::uint8_t read_subclass(std::uint8_t bus, std::uint8_t slot,
+				   std::uint8_t func);
+	std::uint8_t read_prog_if(std::uint8_t bus, std::uint8_t slot,
+				  std::uint8_t func);
+	std::uint8_t read_header_type(std::uint8_t bus, std::uint8_t slot,
+				      std::uint8_t func);
+	std::uint32_t read_bar(std::uint8_t bus, std::uint8_t slot,
+			       std::uint8_t func, int bar);
+
+	int device_count() const
+	{
+		return num_devices;
+	}
+	const device* get_device(int index) const;
+
+	static const char* class_name(std::uint8_t class_code,
+				      std::uint8_t subclass);
 };
 
 extern Pci pci;
