@@ -287,6 +287,7 @@ extern "C" void kmain(void)
 		      ist1_stack, ist2_stack, ist3_stack, ist4_stack);
 
 	interrupts::idt::idt.init();
+	__asm__("sti");
 
 	// slub
 
@@ -323,8 +324,6 @@ extern "C" void kmain(void)
 	LOG("Boot time: %llu ns (%llu ms)", elapsed_ns, elapsed_ns / 1'000'000);
 
 	LOG("OH MY FUCKING GOD WE DID NOT TRIPPLE FAULT");
-
-	asm("sti");
 
 	hcf();
 }
