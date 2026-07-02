@@ -3,6 +3,7 @@
 #include <apic/ioapic.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <drivers/storage/ahci.hpp>
 #include <gdt/gdt.hpp>
 #include <hpet/hpet.hpp>
 #include <idt/idt.hpp>
@@ -322,6 +323,8 @@ extern "C" void kmain(void)
 	sched::scheduler.init();
 
 	pci::pci.init();
+
+	drivers::storage::ahci::controller.init();
 
 	auto boot_end_ticks = timers::hpet::hpet.read_counter();
 	auto elapsed_ticks = boot_end_ticks - boot_start_ticks;

@@ -54,6 +54,7 @@ private:
 public:
 	void init(void);
 	void* kmalloc(std::uint64_t size);
+	void* kcalloc(std::uint64_t n, std::uint64_t size);
 	void kfree(void* ptr);
 };
 

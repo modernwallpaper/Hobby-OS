@@ -98,9 +98,11 @@ void Pci::enumerate(void)
 	{
 		LOG("pci_host_controller_not_found");
 	}
+#endif
 
 	this->check_bus(0);
 
+#ifdef DEBUG
 	for (int i = 0; i < num_devices; ++i)
 	{
 		LOG("bus=%02x; slot=%02x.%x; func=%04x; vendor_id=%04x; "
@@ -151,6 +153,7 @@ void Pci::check_function(std::uint8_t bus, std::uint8_t slot, std::uint8_t func)
 	auto& dev = this->devices[this->num_devices];
 	dev.bus = bus;
 	dev.slot = slot;
+	dev.func = func;
 	dev.vendor_id = this->read_vendor(bus, slot, func);
 	dev.device_id = this->read_device_id(bus, slot, func);
 	dev.class_code = this->read_class(bus, slot, func);

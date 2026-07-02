@@ -1,5 +1,6 @@
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
+#include <memory/memory.hpp>
 #include <memory/slub.hpp>
 #include <panic/panic.hpp>
 
@@ -213,6 +214,15 @@ void* SlubAllocator::kmalloc(std::uint64_t size)
 
 	this->lock.unlock();
 	return obj;
+}
+
+void* SlubAllocator::kcalloc(std::uint64_t n, std::uint64_t size)
+{
+	std::uint64_t total = n * size;
+	void* ptr = this->kmalloc(total);
+	if (ptr)
+		memory::memset(ptr, 0, total);
+	return ptr;
 }
 
 // free memory, detecting SLUB vs buddy allocation via header magic
