@@ -6,8 +6,6 @@
 #include <panic/panic.hpp>
 #include <pci/pci.hpp>
 
-// TODOS: reset controller
-
 namespace drivers
 {
 
@@ -21,13 +19,20 @@ Controller controller;
 
 void Controller::init(void)
 {
+
 	this->find_controller();
 
 	memory::map_mmio_page(this->controller_address,
 			      this->controller_address + memory::hhdm_offset);
 
-	auto* abar = static_cast<hba_mem*>(
+	auto* abar = static_cast<volatile hba_mem*>(
 	    memory::phys_to_virt(this->controller_address));
+
+	this->bohc_handoff(abar);
+
+	this->reset_controller(abar);
+
+	abar->ghc |= (1 << 31); // Turn on AHCI mode
 
 	this->probe_port(abar);
 
@@ -36,9 +41,19 @@ void Controller::init(void)
 	for (int i = 0; i < port_count; ++i)
 	{
 		if (pi & 1)
-			this->handoff_bios_port(&abar->ports[i], i);
+			this->port_rebase(&abar->ports[i], i);
 		pi >>= 1;
 	}
+}
+
+void Controller::reset_controller(volatile hba_mem* abar)
+{
+	abar->ghc |= (1 << 0);
+	while (abar->ghc & (1 << 0))
+		;
+#ifdef DEBUG
+	LOG("success=true;");
+#endif
 }
 
 void Controller::find_controller(void)
@@ -200,7 +215,40 @@ void Controller::find_controller(void)
 	PANIC("Could not find AHCI or IDE controller");
 }
 
-void Controller::probe_port(hba_mem* abar)
+void Controller::bohc_handoff(volatile hba_mem* abar)
+{
+	if (!(abar->bohc & 1))
+	{
+#ifdef DEBUG
+		LOG("bohc_handoff_success");
+#endif
+		return;
+	}
+
+	abar->bohc |= 2;
+
+	int timeout = 1000000;
+	while (abar->bohc & 1)
+	{
+		if (--timeout <= 0)
+			break;
+	}
+
+	if (abar->bohc & 1)
+	{
+#ifdef DEBUG
+		LOG("bohc_handoff_timeout; bios_did_not_release");
+#endif
+	}
+
+	if (abar->bohc & 8)
+		abar->bohc |= 8;
+#ifdef DEBUG
+	LOG("bohc_handoff_success");
+#endif
+}
+
+void Controller::probe_port(volatile hba_mem* abar)
 {
 	// search disk in implemented ports
 	std::uint32_t pi = abar->pi;
@@ -245,7 +293,7 @@ void Controller::probe_port(hba_mem* abar)
 	}
 }
 
-int Controller::check_type(hba_port* port)
+int Controller::check_type(volatile hba_port* port)
 {
 	std::uint32_t ssts = port->ssts;
 	std::uint8_t ipm = (ssts >> 8) & 0x0F;
@@ -266,7 +314,7 @@ int Controller::check_type(hba_port* port)
 	}
 }
 
-void Controller::handoff_bios_port(hba_port* port, int port_number)
+void Controller::port_rebase(volatile hba_port* port, int port_number)
 {
 	this->stop_cmd(port);
 
@@ -309,7 +357,7 @@ void Controller::handoff_bios_port(hba_port* port, int port_number)
 #endif
 }
 
-void Controller::start_cmd(hba_port* port)
+void Controller::start_cmd(volatile hba_port* port)
 {
 	// wait until CR (bit 15) is cleared
 	while (port->cmd & HBA_PxCMD_CR)
@@ -319,7 +367,7 @@ void Controller::start_cmd(hba_port* port)
 	port->cmd |= HBA_PxCMD_ST;
 }
 
-void Controller::stop_cmd(hba_port* port)
+void Controller::stop_cmd(volatile hba_port* port)
 {
 	// clear ST (bit 0)
 	port->cmd &= ~HBA_PxCMD_ST;

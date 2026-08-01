@@ -279,11 +279,13 @@ private:
 	static constexpr std::uint8_t AHCI_IDE_SUBCLASS = 0x01;
 	static constexpr std::uint8_t AHCI_PROG_IF = 0x01;
 
-	void probe_port(hba_mem* abar);
-	int check_type(hba_port* port);
-	void handoff_bios_port(hba_port* port, int port_number);
-	void start_cmd(hba_port* port);
-	void stop_cmd(hba_port* port);
+	void bohc_handoff(volatile hba_mem* abar);
+	void probe_port(volatile hba_mem* abar);
+	int check_type(volatile hba_port* port);
+	void port_rebase(volatile hba_port* port, int port_number);
+	void start_cmd(volatile hba_port* port);
+	void stop_cmd(volatile hba_port* port);
+	void reset_controller(volatile hba_mem* abar);
 
 public:
 	void init(void);

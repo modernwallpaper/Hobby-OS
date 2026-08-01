@@ -1,8 +1,8 @@
 #include <acpi/acpi.hpp>
+#include <hpet/hpet.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
-#include <hpet/hpet.hpp>
 
 namespace acpi
 {
@@ -176,8 +176,7 @@ void ACPI::init(void* rsdp_addr)
 			break;
 		}
 		case MADT_LOCAL_X2APIC: {
-			auto* x2 =
-			    reinterpret_cast<madt_entry_x2apic*>(entry);
+			auto* x2 = reinterpret_cast<madt_entry_x2apic*>(entry);
 			this->x2apic_present = true;
 			if ((x2->flags & 1) && this->cpu_count < MAX_CPU)
 			{
