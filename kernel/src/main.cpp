@@ -17,6 +17,7 @@
 #include <ports/ports.hpp>
 #include <sched/sched.hpp>
 #include <smp/smp.hpp>
+#include <tests/tests.hpp>
 #include <tsc/tsc.hpp>
 
 namespace
@@ -298,6 +299,8 @@ extern "C" void kmain(void)
 
 	memory::slub.init();
 
+	tests::run_all();
+
 	// ACPI
 
 	acpi::acpi.init(rsdp_request.response->address);
@@ -325,6 +328,9 @@ extern "C" void kmain(void)
 	pci::pci.init();
 
 	drivers::storage::ahci::controller.init();
+
+	// tests
+	tests::run_all();
 
 	auto boot_end_ticks = timers::hpet::hpet.read_counter();
 	auto elapsed_ticks = boot_end_ticks - boot_start_ticks;
