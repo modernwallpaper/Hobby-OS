@@ -73,6 +73,15 @@ static void (*irq_table[16])(void) = {irq0,  irq1,  irq2,  irq3, irq4,	irq5,
 				      irq6,  irq7,  irq8,  irq9, irq10, irq11,
 				      irq12, irq13, irq14, irq15};
 
+static void (*irq_handler_table[256])(frame*) = {};
+
+void register_irq_handler(int vector, void (*handler)(frame*))
+{
+	if (vector < 0 || vector >= 256)
+		return;
+	irq_handler_table[vector] = handler;
+}
+
 // main interrupt handler: dispatch exceptions and IRQs
 extern "C" frame* isr_handler(frame* frame)
 {
@@ -111,14 +120,11 @@ extern "C" frame* isr_handler(frame* frame)
 	return frame;
 }
 
-// IRQ handler: send EOI to the APIC
+// IRQ handler: dispatch device handler, then send EOI to the APIC
 extern "C" void irq_handler(frame* frame)
 {
-	(void)frame;
-	// #ifdef DEBUG
-	// 	std::uint8_t irq = frame->vector - 32;
-	// 	LOG("irq=%x", irq);
-	// #endif
+	if (irq_handler_table[frame->vector] != nullptr)
+		irq_handler_table[frame->vector](frame);
 	apic::apic.eoi();
 }
 

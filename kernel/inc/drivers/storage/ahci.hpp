@@ -28,9 +28,15 @@ namespace ahci
 #define HBA_PORT_DET_PRESENT 3
 
 #define HBA_PxCMD_ST 0x0001
+#define HBA_PxCMD_IE 0x0002
 #define HBA_PxCMD_FRE 0x0010
 #define HBA_PxCMD_FR 0x4000
 #define HBA_PxCMD_CR 0x8000
+
+#define HBA_GHC_IE 0x00000002
+
+#define HBA_PxIS_D2H 0x00000001
+#define HBA_PxIS_TFES 0x40000000
 
 enum class fis_type {
 	FIS_TYPE_REG_H2D = 0x27,
@@ -289,6 +295,7 @@ private:
 
 public:
 	void init(void);
+	void irq(void);
 };
 
 extern Controller controller;

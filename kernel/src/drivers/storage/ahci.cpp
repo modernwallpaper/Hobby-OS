@@ -1,4 +1,7 @@
+#include <apic/apic.hpp>
+#include <apic/ioapic.hpp>
 #include <drivers/storage/ahci.hpp>
+#include <idt/idt.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
@@ -17,10 +20,19 @@ namespace ahci
 
 Controller controller;
 
+void ahci_irq_stub(interrupts::idt::frame* frame)
+{
+	(void)frame;
+	controller.irq();
+}
+
 void Controller::init(void)
 {
 
 	this->find_controller();
+
+	interrupts::idt::register_irq_handler(32 + this->irq_line,
+					      ahci_irq_stub);
 
 	memory::map_mmio_page(this->controller_address,
 			      this->controller_address + memory::hhdm_offset);
@@ -33,6 +45,7 @@ void Controller::init(void)
 	this->reset_controller(abar);
 
 	abar->ghc |= (1 << 31); // Turn on AHCI mode
+	abar->ghc |= HBA_GHC_IE; // Enable global interrupts
 
 	this->probe_port(abar);
 
@@ -44,6 +57,16 @@ void Controller::init(void)
 			this->port_rebase(&abar->ports[i], i);
 		pi >>= 1;
 	}
+
+	// create irq and route
+	std::uint64_t vec = irq_line + 32;
+	interrupts::ioapic::ioapic.redirect_irq(
+	    static_cast<std::uint8_t>(irq_line), static_cast<std::uint8_t>(vec),
+	    interrupts::apic::apic.get_id());
+	interrupts::ioapic::ioapic.unmask_irq(
+	    static_cast<std::uint8_t>(irq_line));
+
+	abar->ghc |= (1 << 1); // GHC.IE: global interrupt enable
 }
 
 void Controller::reset_controller(volatile hba_mem* abar)
@@ -54,6 +77,41 @@ void Controller::reset_controller(volatile hba_mem* abar)
 #ifdef DEBUG
 	LOG("success=true;");
 #endif
+}
+
+void Controller::irq(void)
+{
+	auto* abar = static_cast<volatile hba_mem*>(
+	    memory::phys_to_virt(this->controller_address));
+
+	std::uint32_t is = abar->is;
+	if (is == 0)
+		return;
+
+	abar->is = is;
+
+	for (int i = 0; i < 32; ++i)
+	{
+		if (!(is & (1 << i)))
+			continue;
+
+		volatile hba_port* port = &abar->ports[i];
+		std::uint32_t pis = port->is;
+		port->is = pis;
+
+		if (pis & HBA_PxIS_TFES)
+		{
+#ifdef DEBUG
+			LOG("port=%d; task_file_error", i);
+#endif
+		}
+		if (pis & HBA_PxIS_D2H)
+		{
+#ifdef DEBUG
+			LOG("port=%d; d2h", i);
+#endif
+		}
+	}
 }
 
 void Controller::find_controller(void)
@@ -349,6 +407,11 @@ void Controller::port_rebase(volatile hba_port* port, int port_number)
 	}
 
 	this->start_cmd(port);
+
+	port->is = (std::uint32_t)-1; // clear pending port interrupts
+	port->ie = HBA_PxIS_D2H | HBA_PxIS_TFES; // enable D2H + TFES
+	port->cmd |= HBA_PxCMD_IE; // enable port interrupts
+
 #ifdef DEBUG
 	LOG("port=%i; clb=%p; fb=%p; ct=%p", port_number,
 	    static_cast<std::uintptr_t>(clb_phys),

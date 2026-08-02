@@ -54,6 +54,8 @@ extern IDT idt;
 extern "C" frame* isr_handler(frame* frame);
 extern "C" void irq_handler(frame* frame);
 
+void register_irq_handler(int vector, void (*handler)(frame*));
+
 } // namespace idt
 
 } // namespace interrupts
