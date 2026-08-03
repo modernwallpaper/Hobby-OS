@@ -96,61 +96,47 @@ thread* Scheduler::get_idle(void)
 	return this->idle_sched.get_idle(smp::this_cpu()->cpu_id);
 }
 
-interrupts::idt::frame* Scheduler::tick(interrupts::idt::frame* f)
+// Run one scheduling step. Called only from interrupt context (timer tick or
+// the yield software interrupt), where IF is already cleared by the interrupt
+// gate. The scheduler lock is therefore always acquired with IF disabled:
+// no interrupt can re-enter the scheduler while a CPU holds it, so an ISR can
+// never spin on a lock held by the very thread it interrupted.
+//
+// The global lock serializes the enqueue-then-pick decision (lock order is
+// always global -> per-queue, so no lock-order inversion is possible).
+interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
+					    bool preempt)
 {
 	thread* current = current_thread();
 	if (!current)
 		return f;
 
-	this->lock.lock();
+	std::uint64_t flags;
+	this->lock.lock_save(flags);
 
 	current->rsp = reinterpret_cast<std::uint64_t*>(f);
 
-	if (current->remaining_ticks > 0)
-		current->remaining_ticks--;
-
-	if (current->remaining_ticks == 0)
+	bool requeue;
+	if (preempt)
 	{
-		if (current->policy != Policy::IDLE &&
-		    current->state != TaskState::DEAD)
-		{
-			current->remaining_ticks = DEFAULT_TIMESLICE;
-			this->enqueue(current);
-		}
-
-		thread* next = this->pick_next();
-
-		if (next && next != current)
-		{
-			if (next->policy == Policy::IDLE)
-				next->remaining_ticks = 1;
-			else
-				next->remaining_ticks = DEFAULT_TIMESLICE;
-
-			next->state = TaskState::RUNNING;
-			smp::this_cpu()->current_thread = next;
-			this->lock.unlock();
-			return reinterpret_cast<interrupts::idt::frame*>(
-			    next->rsp);
-		}
-
-		if (current->policy == Policy::IDLE)
-			current->remaining_ticks = 1;
+		if (current->remaining_ticks > 0)
+			current->remaining_ticks--;
+		requeue = (current->remaining_ticks == 0);
+	}
+	else
+	{
+		requeue = true;
 	}
 
-	this->lock.unlock();
-	return f;
-}
-
-interrupts::idt::frame* Scheduler::yield(interrupts::idt::frame* f)
-{
-	thread* current = current_thread();
-	if (!current)
+	// The current thread still has CPU time left, so it keeps the CPU. Do not
+	// switch away, otherwise a thread that is RUNNING but not in any run queue
+	// (e.g. the boot thread before it is enqueued) would be stranded forever
+	// and the machine would fall into the idle loop mid-boot.
+	if (!requeue)
+	{
+		this->lock.unlock_restore(flags);
 		return f;
-
-	this->lock.lock();
-
-	current->rsp = reinterpret_cast<std::uint64_t*>(f);
+	}
 
 	if (current->policy != Policy::IDLE &&
 	    current->state != TaskState::DEAD)
@@ -170,12 +156,25 @@ interrupts::idt::frame* Scheduler::yield(interrupts::idt::frame* f)
 
 		next->state = TaskState::RUNNING;
 		smp::this_cpu()->current_thread = next;
-		this->lock.unlock();
+		this->lock.unlock_restore(flags);
 		return reinterpret_cast<interrupts::idt::frame*>(next->rsp);
 	}
 
-	this->lock.unlock();
+	if (current->policy == Policy::IDLE)
+		current->remaining_ticks = 1;
+
+	this->lock.unlock_restore(flags);
 	return f;
+}
+
+interrupts::idt::frame* Scheduler::tick(interrupts::idt::frame* f)
+{
+	return this->schedule(f, true);
+}
+
+interrupts::idt::frame* Scheduler::yield(interrupts::idt::frame* f)
+{
+	return this->schedule(f, false);
 }
 
 void Scheduler::yield(void)

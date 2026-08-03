@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <sync/spinlock.hpp>
 
 namespace sched
 {
@@ -12,6 +13,7 @@ namespace round_robin
 
 class RoundRobin {
 private:
+	sync::IrqSpinlock lock;
 	thread* head;
 	thread* tail;
 

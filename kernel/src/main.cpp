@@ -299,8 +299,6 @@ extern "C" void kmain(void)
 
 	memory::slub.init();
 
-	tests::run_all();
-
 	// ACPI
 
 	acpi::acpi.init(rsdp_request.response->address);
@@ -328,6 +326,21 @@ extern "C" void kmain(void)
 	pci::pci.init();
 
 	drivers::storage::ahci::controller.init();
+
+	// exercise the AHCI MSI/INTx interrupt path: read the boot disks first
+	// sector and check for the MBR signature 0x55 0xAA at bytes 510/511
+	std::uint8_t boot_sector[512];
+	if (drivers::storage::ahci::controller.read_sector(0, 0, boot_sector))
+	{
+		LOG("ahci_read_sector_ok; first=0x%02x%02x%02x%02x; "
+		    "mbr_sig=0x%02x%02x",
+		    boot_sector[0], boot_sector[1], boot_sector[2],
+		    boot_sector[3], boot_sector[510], boot_sector[511]);
+	}
+	else
+	{
+		LOG("ahci_read_sector_failed");
+	}
 
 	// tests
 	tests::run_all();

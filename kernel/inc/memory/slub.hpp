@@ -10,6 +10,12 @@ static constexpr std::uint64_t SLAB_MAGIC = 0xE5E5E5E5E5E5E5E5;
 static constexpr std::uint64_t BUDDY_ALLOC_MAGIC = 0xB0B0B0B0B0B0B0B0;
 static constexpr std::uint64_t KMALLOC_MAX_SLUB = 2048;
 
+// byte pattern written into the body of a freed SLUB object. The first 8
+// bytes are the free-list link, so only bytes [8, obj_size) are poisoned.
+// kmalloc() verifies the pattern is intact before handing the object out,
+// which catches writes to memory that has already been freed.
+static constexpr std::uint8_t SLAB_POISON = 0xCD;
+
 struct SlubCache;
 
 struct Slab {
@@ -45,11 +51,14 @@ private:
 	SlubCache kmalloc_caches[KMALLOC_NUM_CACHES];
 
 	static std::uint64_t align_up(std::uint64_t x, std::uint64_t align);
+	static void poison_object(void* obj, std::uint64_t obj_size);
+	static void verify_poison(void* obj, std::uint64_t obj_size);
 	Slab* slab_from_ptr(void* ptr);
 	void slab_list_remove(Slab* slab);
 	void slab_list_push(Slab* slab, bool is_partial);
 	Slab* slab_alloc_new(SlubCache* cache);
 	SlubCache* cache_for_size(std::uint64_t size);
+	void check_object(Slab* slab, void* ptr);
 
 public:
 	void init(void);

@@ -36,22 +36,35 @@ static std::uint64_t* walk_level(std::uint64_t* table, int idx)
 // map a single 4K page for MMIO with uncacheable+write-through flags
 void map_mmio_page(std::uint64_t phys_addr, std::uint64_t virt_addr)
 {
-	std::uint64_t phys_page = phys_addr & ~0xFFFULL;
-	std::uint64_t virt_page = virt_addr & ~0xFFFULL;
+	map_mmio_range(phys_addr, virt_addr, PAGE_SIZE);
+}
 
-	std::uint64_t cr3;
-	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+// map a range of MMIO pages. size is rounded up to whole pages.
+void map_mmio_range(std::uint64_t phys_addr, std::uint64_t virt_addr,
+		    std::uint64_t size)
+{
+	std::uint64_t count = (size + PAGE_SIZE - 1) / PAGE_SIZE;
 
-	auto* pml4 =
-	    static_cast<std::uint64_t*>(phys_to_virt(cr3 & ~0xFFFULL));
+	for (std::uint64_t i = 0; i < count; i++)
+	{
+		std::uint64_t phys_page = (phys_addr + i * PAGE_SIZE) & ~0xFFFULL;
+		std::uint64_t virt_page = (virt_addr + i * PAGE_SIZE) & ~0xFFFULL;
 
-	std::uint64_t* pdpt = walk_level(pml4, pt_index(virt_page, 3));
-	std::uint64_t* pd = walk_level(pdpt, pt_index(virt_page, 2));
-	std::uint64_t* pt = walk_level(pd, pt_index(virt_page, 1));
+		std::uint64_t cr3;
+		__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 
-	pt[pt_index(virt_page, 0)] = phys_page | PAGE_MMIO_FLAGS;
+		auto* pml4 =
+		    static_cast<std::uint64_t*>(phys_to_virt(cr3 & ~0xFFFULL));
 
-	__asm__ volatile("invlpg %0" : : "m"(*(volatile char*)virt_page));
+		std::uint64_t* pdpt =
+		    walk_level(pml4, pt_index(virt_page, 3));
+		std::uint64_t* pd = walk_level(pdpt, pt_index(virt_page, 2));
+		std::uint64_t* pt = walk_level(pd, pt_index(virt_page, 1));
+
+		pt[pt_index(virt_page, 0)] = phys_page | PAGE_MMIO_FLAGS;
+
+		__asm__ volatile("invlpg %0" : : "m"(*(volatile char*)virt_page));
+	}
 }
 
 } // namespace memory

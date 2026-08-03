@@ -131,6 +131,50 @@ irq_stub 13
 irq_stub 14
 irq_stub 15
 
+; Device IRQ stubs for vectors 0x40-0x5F. MSI/INTx devices need vector numbers
+; above the 16 legacy IRQ slots; the pushed vector must match the IDT gate
+; index so the handler table dispatches to the right driver.
+%macro ext_irq_stub 1
+global ext_irq%1
+ext_irq%1:
+    push 0
+    push 0x40 + %1
+    jmp isr_common
+%endmacro
+
+ext_irq_stub 0
+ext_irq_stub 1
+ext_irq_stub 2
+ext_irq_stub 3
+ext_irq_stub 4
+ext_irq_stub 5
+ext_irq_stub 6
+ext_irq_stub 7
+ext_irq_stub 8
+ext_irq_stub 9
+ext_irq_stub 10
+ext_irq_stub 11
+ext_irq_stub 12
+ext_irq_stub 13
+ext_irq_stub 14
+ext_irq_stub 15
+ext_irq_stub 16
+ext_irq_stub 17
+ext_irq_stub 18
+ext_irq_stub 19
+ext_irq_stub 20
+ext_irq_stub 21
+ext_irq_stub 22
+ext_irq_stub 23
+ext_irq_stub 24
+ext_irq_stub 25
+ext_irq_stub 26
+ext_irq_stub 27
+ext_irq_stub 28
+ext_irq_stub 29
+ext_irq_stub 30
+ext_irq_stub 31
+
 isr_common:
     push_all_gprs
 

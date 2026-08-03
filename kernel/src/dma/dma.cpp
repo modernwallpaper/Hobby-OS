@@ -27,9 +27,9 @@ addr alloc(std::size_t size)
 
 	std::uint64_t flags;
 	dma_spinlock.lock_save(flags);
-	std::uint64_t virt = memory::buddy.alloc_pages(order);
+	std::uint64_t phys = memory::buddy.alloc_pages(order);
 	dma_spinlock.unlock_restore(flags);
-	if (!virt)
+	if (!phys)
 	{
 #ifdef DEBUG
 		LOG("oom; bytes=%u; pages=%u; order=%u", size, pages, order);
@@ -37,8 +37,8 @@ addr alloc(std::size_t size)
 		return {nullptr, 0};
 	}
 	addr result;
-	result.virt = reinterpret_cast<void*>(virt);
-	result.phys = memory::virt_to_phys(reinterpret_cast<void*>(virt));
+	result.virt = memory::phys_to_virt(phys);
+	result.phys = phys;
 	return result;
 }
 
@@ -52,12 +52,11 @@ void free(addr address, std::size_t size)
 		++order;
 	if (order >= memory::MAX_ORDER)
 	{
-		PANIC("invaled_free_order_for_size; order=%d; size=%u");
+		PANIC("invaled_free_order_for_size; order=%d; size=%u", order, size);
 	}
 	std::uint64_t flags;
 	dma_spinlock.lock_save(flags);
-	memory::buddy.free_page(reinterpret_cast<std::uint64_t>(address.virt),
-				order);
+	memory::buddy.free_page(address.phys, order);
 	dma_spinlock.unlock_restore(flags);
 }
 

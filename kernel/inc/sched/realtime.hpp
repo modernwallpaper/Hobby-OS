@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <sync/spinlock.hpp>
 
 namespace sched
 {
@@ -12,6 +13,7 @@ namespace realtime
 
 class Realtime {
 private:
+	sync::IrqSpinlock lock;
 	thread* head;
 	thread* tail;
 

@@ -54,6 +54,8 @@ private:
 	sync::IrqSpinlock lock;
 
 	thread* get_idle(void);
+	interrupts::idt::frame* schedule(interrupts::idt::frame* f,
+					bool preempt);
 
 public:
 	void init(void);

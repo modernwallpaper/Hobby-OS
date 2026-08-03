@@ -84,6 +84,110 @@ std::uint32_t Pci::read_bar(std::uint8_t bus, std::uint8_t slot,
 	return this->read_config(bus, slot, func, PCI_BAR0 + bar * 4);
 }
 
+// 16-bit config read/write that preserves the untouched half of the dword
+std::uint16_t Pci::read_config16(std::uint8_t bus, std::uint8_t slot,
+				 std::uint8_t func, std::uint8_t offset)
+{
+	std::uint8_t aligned = offset & ~0x3;
+	std::uint32_t raw = this->read_config(bus, slot, func, aligned);
+	return static_cast<std::uint16_t>(raw >> ((offset & 0x3) * 8));
+}
+
+void Pci::write_config16(std::uint8_t bus, std::uint8_t slot,
+			 std::uint8_t func, std::uint8_t offset,
+			 std::uint16_t value)
+{
+	std::uint8_t aligned = offset & ~0x3;
+	std::uint32_t raw = this->read_config(bus, slot, func, aligned);
+	std::uint8_t shift = (offset & 0x3) * 8;
+	raw &= ~(0xFFFF << shift);
+	raw |= static_cast<std::uint32_t>(value) << shift;
+	this->write_config(bus, slot, func, aligned, raw);
+}
+
+// walk the capability linked list looking for cap_id; returns its config
+// offset, or 0 if the device does not implement it
+std::uint8_t Pci::find_capability(std::uint8_t bus, std::uint8_t slot,
+				  std::uint8_t func, std::uint8_t cap_id)
+{
+	std::uint8_t cap = static_cast<std::uint8_t>(
+	    this->read_config(bus, slot, func, PCI_CAP_PTR));
+
+	while ((cap & 0xFC) != 0)
+	{
+		std::uint16_t id_next =
+		    this->read_config16(bus, slot, func, cap);
+		if (static_cast<std::uint8_t>(id_next & 0xFF) == cap_id)
+			return cap;
+		cap = static_cast<std::uint8_t>(id_next >> 8);
+	}
+	return 0;
+}
+
+// decode a BAR: full 64-bit address plus its size, obtained by writing all
+// ones and reading back the mask (the original value is restored)
+bar_info Pci::read_bar_info(std::uint8_t bus, std::uint8_t slot,
+			    std::uint8_t func, int bar)
+{
+	bar_info info = {0, 0, false, false, false};
+	if (bar < 0 || bar > 5)
+		return info;
+
+	std::uint8_t offset = PCI_BAR0 + bar * 4;
+	std::uint32_t orig = this->read_config(bus, slot, func, offset);
+
+	info.is_io = (orig & PCI_BAR_TYPE_IO) != 0;
+	info.is_64 = (orig & PCI_BAR_64_BIT) == PCI_BAR_64_BIT;
+	info.prefetchable = (orig & PCI_BAR_PREFETCH) != 0;
+
+	std::uint32_t mask = info.is_io ? 0xFFFFFFFC : 0xFFFFFFF0;
+	std::uint64_t addr = orig & mask;
+	if (info.is_64 && bar < 5)
+	{
+		std::uint32_t hi = this->read_config(bus, slot, func,
+						     offset + 4);
+		addr |= static_cast<std::uint64_t>(hi) << 32;
+	}
+	info.address = addr;
+
+	if (info.is_64 && bar < 5)
+	{
+		std::uint32_t orig_hi =
+		    this->read_config(bus, slot, func, offset + 4);
+		this->write_config(bus, slot, func, offset, 0xFFFFFFFF);
+		this->write_config(bus, slot, func, offset + 4, 0xFFFFFFFF);
+		std::uint32_t probe_lo =
+		    this->read_config(bus, slot, func, offset);
+		std::uint32_t probe_hi =
+		    this->read_config(bus, slot, func, offset + 4);
+		this->write_config(bus, slot, func, offset + 4, orig_hi);
+		this->write_config(bus, slot, func, offset, orig);
+
+		std::uint64_t raw = static_cast<std::uint64_t>(probe_hi) << 32 |
+				    probe_lo;
+		info.size = ~(raw & ~0xFULL) + 1;
+	}
+	else
+	{
+		this->write_config(bus, slot, func, offset, 0xFFFFFFFF);
+		std::uint32_t probe =
+		    this->read_config(bus, slot, func, offset);
+		this->write_config(bus, slot, func, offset, orig);
+
+		if (info.is_io)
+			info.size = ~(probe & 0xFFFFFFFC) + 1;
+		else
+			info.size = ~(probe & 0xFFFFFFF0) + 1;
+	}
+
+	// a BAR that reports no address (or a read-only/unimplemented BAR)
+	// is unusable regardless of what the size probe returned
+	if (info.size == 0 || info.address == 0)
+		info.size = 0;
+
+	return info;
+}
+
 const device* Pci::get_device(int index) const
 {
 	if (index < 0 || index >= this->num_devices)

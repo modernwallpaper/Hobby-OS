@@ -29,10 +29,12 @@ private:
 
 public:
 	void init(std::uint32_t base_phys = IOAPIC_DEFAULT_BASE);
+	int max_pins(void) const;
 	void mask_irq(std::uint8_t irq);
 	void unmask_irq(std::uint8_t irq);
 	void redirect_irq(std::uint8_t irq, std::uint8_t vector,
-			  std::uint8_t apic_id);
+			  std::uint8_t apic_id, bool level_triggered = false,
+			  bool active_low = false);
 };
 
 extern IOAPIC ioapic;

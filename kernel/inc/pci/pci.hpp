@@ -45,6 +45,23 @@ namespace pci
 
 #define PCI_MAX_DEVICES 256
 
+#define PCI_BAR_TYPE_IO 0x01
+#define PCI_BAR_TYPE_MEM 0x00
+#define PCI_BAR_64_BIT 0x04
+#define PCI_BAR_PREFETCH 0x08
+
+// PCI capability IDs
+#define PCI_CAP_POWER_MGMT 0x01
+#define PCI_CAP_MSI 0x05
+#define PCI_CAP_PCIE 0x10
+#define PCI_CAP_MSIX 0x11
+
+// MSI message control register bits
+#define PCI_MSI_CTRL_ENABLE (1 << 0)
+#define PCI_MSI_CTRL_MME_MASK (0x7 << 4)
+#define PCI_MSI_CTRL_64BIT (1 << 7)
+#define PCI_MSI_CTRL_PVMC (1 << 8)
+
 struct device {
 	std::uint8_t bus;
 	std::uint8_t slot;
@@ -55,6 +72,15 @@ struct device {
 	std::uint8_t subclass;
 	std::uint8_t prog_if;
 	std::uint8_t header_type;
+};
+
+// decoded contents of one BAR register
+struct bar_info {
+	std::uint64_t address;
+	std::uint64_t size;
+	bool is_io;
+	bool is_64;
+	bool prefetchable;
 };
 
 class Pci {
@@ -75,6 +101,12 @@ public:
 			  std::uint8_t func, std::uint8_t offset,
 			  std::uint32_t value);
 
+	std::uint16_t read_config16(std::uint8_t bus, std::uint8_t slot,
+				    std::uint8_t func, std::uint8_t offset);
+	void write_config16(std::uint8_t bus, std::uint8_t slot,
+			    std::uint8_t func, std::uint8_t offset,
+			    std::uint16_t value);
+
 	std::uint16_t read_vendor(std::uint8_t bus, std::uint8_t slot,
 				  std::uint8_t func);
 	std::uint16_t read_device_id(std::uint8_t bus, std::uint8_t slot,
@@ -89,6 +121,11 @@ public:
 				      std::uint8_t func);
 	std::uint32_t read_bar(std::uint8_t bus, std::uint8_t slot,
 			       std::uint8_t func, int bar);
+	bar_info read_bar_info(std::uint8_t bus, std::uint8_t slot,
+			       std::uint8_t func, int bar);
+
+	std::uint8_t find_capability(std::uint8_t bus, std::uint8_t slot,
+				     std::uint8_t func, std::uint8_t cap_id);
 
 	int device_count() const
 	{

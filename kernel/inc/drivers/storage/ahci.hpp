@@ -33,10 +33,23 @@ namespace ahci
 #define HBA_PxCMD_FR 0x4000
 #define HBA_PxCMD_CR 0x8000
 
+#define HBA_GHC_HR 0x00000001
 #define HBA_GHC_IE 0x00000002
+#define HBA_GHC_AE 0x80000000
 
 #define HBA_PxIS_D2H 0x00000001
 #define HBA_PxIS_TFES 0x40000000
+
+#define ATA_CMD_READ_DMA_EXT 0x25
+
+// fixed IDT vector used for the controller (MSI or INTx). It lives inside the
+// device-IRQ window (0x40..0x5F) that the IDT wires up as dispatchable gates.
+static constexpr std::uint8_t DEVICE_IRQ_VECTOR = 0x50;
+
+// timeout for controller-level operations (reset, BOHC handoff)
+static constexpr std::uint64_t CONTROLLER_TIMEOUT_US = 1000000;
+// timeout for per-port command-list state transitions
+static constexpr std::uint64_t PORT_TIMEOUT_US = 100000;
 
 enum class fis_type {
 	FIS_TYPE_REG_H2D = 0x27,
@@ -272,6 +285,14 @@ private:
 
 	// ATA
 	std::uint64_t controller_address;
+	std::uint64_t controller_size;
+
+	// MSI/INTx
+	bool use_msi;
+	std::uint8_t irq_vector;
+
+	// set by the ISR when a port interrupt arrives while a command is in flight
+	volatile bool irq_fired;
 
 	// IDE
 	std::uint64_t primary_io_base;
@@ -293,9 +314,15 @@ private:
 	void stop_cmd(volatile hba_port* port);
 	void reset_controller(volatile hba_mem* abar);
 
+	bool msi_enable(void);
+	void intx_setup(void);
+
 public:
 	void init(void);
 	void irq(void);
+	// read one 512-byte sector from a SATA port into buf; blocks until the
+	// completion interrupt fires (or a timeout), proving IRQ delivery
+	bool read_sector(int port_num, std::uint64_t lba, void* buf);
 };
 
 extern Controller controller;

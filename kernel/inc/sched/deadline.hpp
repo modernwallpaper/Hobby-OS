@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <sync/spinlock.hpp>
 
 namespace sched
 {
@@ -12,6 +13,7 @@ namespace deadline
 
 class Deadline {
 private:
+	sync::IrqSpinlock lock;
 	thread* head;
 
 public:

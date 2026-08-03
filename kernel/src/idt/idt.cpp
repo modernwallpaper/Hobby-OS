@@ -47,6 +47,47 @@ extern "C" void isr_unhandled(void);
 extern "C" void lapic_timer_stub(void);
 extern "C" void yield_stub(void);
 
+extern "C" void ext_irq0(void);
+extern "C" void ext_irq1(void);
+extern "C" void ext_irq2(void);
+extern "C" void ext_irq3(void);
+extern "C" void ext_irq4(void);
+extern "C" void ext_irq5(void);
+extern "C" void ext_irq6(void);
+extern "C" void ext_irq7(void);
+extern "C" void ext_irq8(void);
+extern "C" void ext_irq9(void);
+extern "C" void ext_irq10(void);
+extern "C" void ext_irq11(void);
+extern "C" void ext_irq12(void);
+extern "C" void ext_irq13(void);
+extern "C" void ext_irq14(void);
+extern "C" void ext_irq15(void);
+extern "C" void ext_irq16(void);
+extern "C" void ext_irq17(void);
+extern "C" void ext_irq18(void);
+extern "C" void ext_irq19(void);
+extern "C" void ext_irq20(void);
+extern "C" void ext_irq21(void);
+extern "C" void ext_irq22(void);
+extern "C" void ext_irq23(void);
+extern "C" void ext_irq24(void);
+extern "C" void ext_irq25(void);
+extern "C" void ext_irq26(void);
+extern "C" void ext_irq27(void);
+extern "C" void ext_irq28(void);
+extern "C" void ext_irq29(void);
+extern "C" void ext_irq30(void);
+extern "C" void ext_irq31(void);
+
+static void (*ext_irq_table[32])(void) = {
+    ext_irq0,  ext_irq1,  ext_irq2,  ext_irq3,	 ext_irq4,  ext_irq5,
+    ext_irq6,  ext_irq7,  ext_irq8,  ext_irq9,	 ext_irq10, ext_irq11,
+    ext_irq12, ext_irq13, ext_irq14, ext_irq15, ext_irq16, ext_irq17,
+    ext_irq18, ext_irq19, ext_irq20, ext_irq21, ext_irq22, ext_irq23,
+    ext_irq24, ext_irq25, ext_irq26, ext_irq27, ext_irq28, ext_irq29,
+    ext_irq30, ext_irq31};
+
 static void (*isr_table[32])(void) = {
     isr0,  isr1,  isr2,	 isr3,	isr4,  isr5,  isr6,  isr7,  isr8,  isr9,  isr10,
     isr11, isr12, isr13, isr14, isr15, isr16, isr17, isr18, isr19, isr20, isr21,
@@ -88,17 +129,7 @@ extern "C" frame* isr_handler(frame* frame)
 	// #ifdef DEBUG
 	// 	LOG("vector=%x", frame->vector);
 	// #endif
-	if (frame->vector == 0)
-	{
-#ifdef DEBUG
-		LOG("divide_by_zero; rip=%x", frame->rip);
-#endif
-	}
-	else if (frame->vector >= 32 && frame->vector <= 47)
-	{
-		irq_handler(frame);
-	}
-	else if (frame->vector == 48)
+	if (frame->vector == 48)
 	{
 		apic::apic.eoi();
 		apic::apic.timer_oneshot_periodic_tick();
@@ -107,6 +138,18 @@ extern "C" frame* isr_handler(frame* frame)
 	else if (frame->vector == 0xFE)
 	{
 		return sched::scheduler.yield(frame);
+	}
+	else if (frame->vector >= 32 && frame->vector < 256 &&
+		 (frame->vector <= 47 ||
+		  irq_handler_table[frame->vector] != nullptr))
+	{
+		irq_handler(frame);
+	}
+	else if (frame->vector == 0)
+	{
+#ifdef DEBUG
+		LOG("divide_by_zero; rip=%x", frame->rip);
+#endif
 	}
 	else
 	{
@@ -151,6 +194,12 @@ void IDT::init(void)
 				       reinterpret_cast<void*>(isr_unhandled));
 		}
 	}
+
+	// device IRQ gates must be wired after the 48..255 sweep above so the
+	// generic isr_unhandled gate does not overwrite them
+	for (int i = 0; i < 32; ++i)
+		this->set_gate(0x40 + i,
+			       reinterpret_cast<void*>(ext_irq_table[i]));
 
 	this->set_ist(1, 1);
 	this->set_ist(2, 2);

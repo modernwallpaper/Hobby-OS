@@ -62,6 +62,12 @@ void IOAPIC::init(std::uint32_t base_phys)
 #endif
 }
 
+// number of redirection pins this driver will program
+int IOAPIC::max_pins(void) const
+{
+	return this->MAX_REDIRECTION_ENTRIES;
+}
+
 // mask (disable) a specific IRQ pin
 void IOAPIC::mask_irq(std::uint8_t irq)
 {
@@ -80,13 +86,23 @@ void IOAPIC::unmask_irq(std::uint8_t irq)
 	this->write_register(static_cast<std::uint8_t>(index), low);
 }
 
-// route an IRQ pin to a specific APIC and interrupt vector
+// route an IRQ pin to a specific APIC and interrupt vector. PCI INTx lines
+// are level-triggered, active-low; legacy (ISA) interrupts are edge-triggered,
+// active-high — pass the matching flags so real hardware delivers correctly.
 void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
-			  std::uint8_t apic_id)
+			  std::uint8_t apic_id, bool level_triggered,
+			  bool active_low)
 {
 	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
 
 	std::uint32_t low = vector;
+
+	// bit 13: polarity (0 = active high, 1 = active low)
+	if (active_low)
+		low |= (1 << 13);
+	// bit 15: trigger mode (0 = edge, 1 = level)
+	if (level_triggered)
+		low |= (1 << 15);
 
 	std::uint32_t high = static_cast<std::uint32_t>(apic_id) << 24;
 
@@ -94,7 +110,8 @@ void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
 	this->write_register(static_cast<std::uint8_t>(index + 1), high);
 
 #ifdef DEBUG
-	LOG("irq=%d; vec_redirect=0x%x; apic=%d", irq, vector, apic_id);
+	LOG("irq=%d; vec_redirect=0x%x; apic=%d; level=%d; active_low=%d",
+	    irq, vector, apic_id, level_triggered, active_low);
 #endif
 }
 

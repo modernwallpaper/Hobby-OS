@@ -14,6 +14,58 @@ std::uint64_t SlubAllocator::align_up(std::uint64_t x, std::uint64_t align)
 	return (x + align - 1) & ~(align - 1);
 }
 
+void SlubAllocator::poison_object(void* obj, std::uint64_t obj_size)
+{
+	if (obj_size > sizeof(void*))
+		memory::memset(static_cast<std::uint8_t*>(obj) + sizeof(void*),
+			       SLAB_POISON, obj_size - sizeof(void*));
+}
+
+void SlubAllocator::verify_poison(void* obj, std::uint64_t obj_size)
+{
+	if (obj_size <= sizeof(void*))
+		return;
+
+	std::uint8_t* body =
+	    static_cast<std::uint8_t*>(obj) + sizeof(void*);
+	for (std::uint64_t i = 0; i < obj_size - sizeof(void*); i++)
+	{
+		if (body[i] != SLAB_POISON)
+		{
+			PANIC("slub_poison_corrupted; ptr=%p; "
+			      "obj_size=%llu; offset=%llu; "
+			      "found=0x%02x; use_after_free",
+			      obj, obj_size, i, body[i]);
+		}
+	}
+}
+
+// validate that a pointer is a properly aligned object inside the slab
+void SlubAllocator::check_object(Slab* slab, void* ptr)
+{
+	SlubCache* cache = slab->cache;
+	std::uint64_t header_size = this->align_up(sizeof(Slab), 8);
+
+	std::uint64_t slab_base = reinterpret_cast<std::uint64_t>(slab);
+	std::uint64_t ptr_addr = reinterpret_cast<std::uint64_t>(ptr);
+
+	if (ptr_addr < slab_base + header_size ||
+	    ptr_addr + cache->obj_size > slab_base + PAGE_SIZE)
+	{
+		PANIC("slub_free_out_of_bounds; ptr=%p; slab=%p; "
+		      "obj_size=%llu",
+		      ptr, slab, cache->obj_size);
+	}
+
+	std::uint64_t obj_off = ptr_addr - (slab_base + header_size);
+	if (obj_off % cache->obj_size != 0)
+	{
+		PANIC("slub_free_misaligned; ptr=%p; slab=%p; "
+		      "obj_size=%llu; offset=%llu",
+		      ptr, slab, cache->obj_size, obj_off);
+	}
+}
+
 // locate the slab header from an object pointer
 Slab* SlubAllocator::slab_from_ptr(void* ptr)
 {
@@ -87,6 +139,7 @@ Slab* SlubAllocator::slab_alloc_new(SlubCache* cache)
 	for (std::uint16_t i = 0; i < slab->total; i++)
 	{
 		*reinterpret_cast<void**>(obj_ptr) = head;
+		this->poison_object(obj_ptr, cache->obj_size);
 		head = obj_ptr;
 		obj_ptr += cache->obj_size;
 	}
@@ -188,20 +241,14 @@ void* SlubAllocator::kmalloc(std::uint64_t size)
 	void* obj = slab->free_list;
 	if (!obj)
 	{
-#ifdef DEBUG
-		LOG("kmalloc=%llu; slab_corrupted; free_list=null; "
-		    "allocating_new_slab",
-		    size);
-#endif
-		slab = this->slab_alloc_new(cache);
-		if (!slab)
-		{
-			this->lock.unlock();
-			return nullptr;
-		}
-		this->slab_list_push(slab, true);
-		obj = slab->free_list;
+		PANIC("slub_free_list_null; cache_obj_size=%llu; "
+		      "inuse=%u; total=%u; slab_corrupted",
+		      cache->obj_size, slab->inuse, slab->total);
 	}
+
+	// the object was poisoned on free; if the pattern is gone someone
+	// wrote to it after it was freed
+	this->verify_poison(obj, cache->obj_size);
 
 	slab->free_list = *reinterpret_cast<void**>(obj);
 	slab->inuse++;
@@ -235,9 +282,30 @@ void SlubAllocator::kfree(void* ptr)
 
 	void* page_base = reinterpret_cast<void*>(
 	    reinterpret_cast<std::uint64_t>(ptr) & ~(PAGE_SIZE - 1));
+
 	if (*static_cast<std::uint64_t*>(page_base) == BUDDY_ALLOC_MAGIC)
 	{
 		auto* hdr = static_cast<BuddyAllocHeader*>(page_base);
+
+		// the caller must hand back the exact pointer kmalloc()
+		// returned; interior pointers would free the wrong range
+		std::uint64_t expected =
+		    reinterpret_cast<std::uint64_t>(page_base) +
+		    sizeof(BuddyAllocHeader);
+		if (reinterpret_cast<std::uint64_t>(ptr) != expected)
+		{
+			PANIC("slub_free_misaligned_large; ptr=%p; "
+			      "expected=%p",
+			      ptr,
+			      reinterpret_cast<void*>(expected));
+		}
+
+		if (hdr->order < 0 || hdr->order > MAX_ORDER)
+		{
+			PANIC("slub_free_bad_order; ptr=%p; order=%d", ptr,
+			      hdr->order);
+		}
+
 		buddy.free_page(virt_to_phys(page_base), hdr->order);
 		this->lock.unlock();
 		return;
@@ -250,6 +318,42 @@ void SlubAllocator::kfree(void* ptr)
 		return;
 	}
 
+	SlubCache* cache = slab->cache;
+	if (cache == nullptr)
+	{
+		PANIC("slub_free_null_cache; ptr=%p; slab=%p", ptr, slab);
+	}
+
+	this->check_object(slab, ptr);
+
+	if (slab->inuse == 0)
+	{
+		PANIC("slub_double_free; ptr=%p; slab=%p; inuse=0", ptr,
+		      slab);
+	}
+
+	// detect double frees by scanning the slab's free list. bound the
+	// walk by the number of live free objects so a corrupt cycle can
+	// never spin forever.
+	std::uint16_t max_free = slab->total - slab->inuse;
+	std::uint16_t walked = 0;
+	for (void* f = slab->free_list; f != nullptr;
+	     f = *reinterpret_cast<void**>(f))
+	{
+		if (f == ptr)
+		{
+			PANIC("slub_double_free; ptr=%p; slab=%p", ptr,
+			      slab);
+		}
+		if (++walked > max_free)
+		{
+			PANIC("slub_free_list_corrupt; ptr=%p; slab=%p; "
+			      "cycle_or_overflow",
+			      ptr, slab);
+		}
+	}
+
+	this->poison_object(ptr, cache->obj_size);
 	*reinterpret_cast<void**>(ptr) = slab->free_list;
 	slab->free_list = ptr;
 	slab->inuse--;

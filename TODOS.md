@@ -6,5 +6,3 @@
 
   - PCI/AHCI is currently QEMU-friendly more than hardware-ready. That’s normal, but real hardware will punish assumptions around BAR sizing, MSI/MSI-X, IRQ routing, cache coherency, DMA buffers, and
     timeouts.
-
-  - The README undersells the project. It should document boot requirements, architecture, current capabilities, known broken things, and a roadmap.
