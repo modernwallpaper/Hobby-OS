@@ -83,20 +83,33 @@ Slab* SlubAllocator::slab_from_ptr(void* ptr)
 	return slab;
 }
 
-// unlink a slab from its cache's partial/full list
+// unlink a slab from its cache's partial/full list. the list is identified by
+// comparing the slab against the cache's list heads: `prev == nullptr` means
+// the slab is a list head, and a slab demoted from full to partial during
+// kfree has already had its `inuse` decremented, so inuse alone cannot be
+// used to decide which list it belongs to.
 void SlubAllocator::slab_list_remove(Slab* slab)
 {
+	SlubCache* cache = slab->cache;
+
 	if (slab->next)
 		slab->next->prev = slab->prev;
+
 	if (slab->prev)
+	{
 		slab->prev->next = slab->next;
+	}
+	else if (cache->partial == slab)
+	{
+		cache->partial = slab->next;
+	}
+	else if (cache->full == slab)
+	{
+		cache->full = slab->next;
+	}
 	else
 	{
-		SlubCache* cache = slab->cache;
-		if (slab->inuse == slab->total)
-			cache->full = slab->next;
-		else
-			cache->partial = slab->next;
+		PANIC("slub_list_orphan; slab=%p; cache=%p", slab, cache);
 	}
 }
 

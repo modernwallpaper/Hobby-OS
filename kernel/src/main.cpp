@@ -1,6 +1,7 @@
 #include <acpi/acpi.hpp>
 #include <apic/apic.hpp>
 #include <apic/ioapic.hpp>
+#include <block/block.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <drivers/storage/ahci.hpp>
@@ -10,6 +11,7 @@
 #include <limine.h>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
+#include <memory/memory.hpp>
 #include <memory/slub.hpp>
 #include <panic/panic.hpp>
 #include <pci/pci.hpp>
@@ -59,6 +61,13 @@ __attribute__((
 			 .revision = 0,
 			 .response = nullptr};
 
+__attribute__((
+    used,
+    section(".limine_requests"))) volatile limine_executable_file_request
+    exec_file_request = {.id = LIMINE_EXECUTABLE_FILE_REQUEST_ID,
+			 .revision = 0,
+			 .response = nullptr};
+
 } // namespace
 
 namespace
@@ -75,125 +84,65 @@ __attribute__((used, section(".limine_requests_end"))) volatile std::uint64_t
 namespace
 {
 
-static void reserve_kernel_pages(void)
+// Compute the kernel image's physical footprint (including BSS) by parsing the
+// PT_LOAD program headers of the loaded ELF. Limine hands us the raw ELF
+// buffer through the executable file request; the memory map does not
+// necessarily exclude every BSS page from USABLE ranges, so the buddy
+// allocator must reserve the exact range up front.
+static std::uint64_t elf_kernel_size(const void* image,
+				     std::uint64_t virtual_base)
 {
-	// Walk the kernel page tables to find every physical page mapped in the
-	// higher half (above 0xFFFF800000000000), then reserve those pages so
-	// the buddy allocator never hands them out. This prevents corruption
-	// when the bootloader scatters kernel BSS pages across USABLE regions.
-	std::uint64_t cr3;
-	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-	auto* pml4 =
-	    static_cast<std::uint64_t*>(memory::phys_to_virt(cr3 & ~0xFFFULL));
+	const auto* e = static_cast<const std::uint8_t*>(image);
+	if (!e)
+		return 0;
 
-	std::uint64_t total_reserved = 0;
+	// ELF magic, ELF64 class, little endian
+	if (e[0] != 0x7F || e[1] != 'E' || e[2] != 'L' || e[3] != 'F')
+		return 0;
+	if (e[4] != 2 || e[5] != 1)
+		return 0;
 
-	// Walk each higher-half PML4 entry except 256 (HHDM maps everything)
-	for (int pml4i = 257; pml4i < 512; pml4i++)
+	std::uint64_t phoff = 0;
+	for (int i = 0; i < 8; i++)
+		phoff |= static_cast<std::uint64_t>(e[32 + i]) << (8 * i);
+	std::uint16_t phentsize =
+	    static_cast<std::uint16_t>(e[54]) | (static_cast<std::uint16_t>(e[55]) << 8);
+	std::uint16_t phnum = static_cast<std::uint16_t>(e[56]) |
+			      (static_cast<std::uint16_t>(e[57]) << 8);
+
+	if (phentsize < 56 || phnum == 0)
+		return 0;
+
+	std::uint64_t end = 0;
+	for (std::uint16_t i = 0; i < phnum; i++)
 	{
-		if ((pml4[pml4i] & 1) == 0)
+		const std::uint8_t* ph =
+		    e + phoff + static_cast<std::uint64_t>(i) * phentsize;
+
+		std::uint32_t p_type = 0;
+		for (int b = 0; b < 4; b++)
+			p_type |= static_cast<std::uint32_t>(ph[b]) << (8 * b);
+		if (p_type != 1) // PT_LOAD
 			continue;
 
-		auto* pdpt = static_cast<std::uint64_t*>(
-		    memory::phys_to_virt(pml4[pml4i] & ~0xFFFULL));
-
-		for (int pdpti = 0; pdpti < 512; pdpti++)
+		std::uint64_t p_vaddr = 0, p_memsz = 0;
+		for (int b = 0; b < 8; b++)
 		{
-			if ((pdpt[pdpti] & 1) == 0)
-				continue;
-
-			// 1 GiB page
-			if (pdpt[pdpti] & (1 << 7))
-			{
-				std::uint64_t base =
-				    (pdpt[pdpti] & ~0x3FFFFFULL);
-				memory::buddy.reserve_range(
-				    base, base + 0x40000000ULL);
-				total_reserved += 0x40000000ULL / 4096;
-				continue;
-			}
-
-			auto* pd = static_cast<std::uint64_t*>(
-			    memory::phys_to_virt(pdpt[pdpti] & ~0xFFFULL));
-
-			for (int pdi = 0; pdi < 512; pdi++)
-			{
-				if ((pd[pdi] & 1) == 0)
-					continue;
-
-				// 2 MiB page
-				if (pd[pdi] & (1 << 7))
-				{
-					std::uint64_t base =
-					    (pd[pdi] & ~0x1FFFFFULL);
-					memory::buddy.reserve_range(
-					    base, base + 0x200000ULL);
-					total_reserved += 512;
-					continue;
-				}
-
-				auto* pt = static_cast<std::uint64_t*>(
-				    memory::phys_to_virt(pd[pdi] & ~0xFFFULL));
-
-				// Reserve contiguous runs of 4K pages
-				std::uint64_t run_start = 0;
-				std::uint64_t run_end = 0;
-				for (int pti = 0; pti < 512; pti++)
-				{
-					if ((pt[pti] & 1) == 0)
-					{
-						if (run_end > run_start)
-						{
-							memory::buddy
-							    .reserve_range(
-								run_start,
-								run_end);
-							total_reserved +=
-							    (run_end -
-							     run_start) /
-							    4096;
-							run_start = 0;
-							run_end = 0;
-						}
-						continue;
-					}
-
-					std::uint64_t phys =
-					    pt[pti] & ~0xFFFULL;
-					if (run_end == 0)
-					{
-						run_start = phys;
-						run_end = phys + 4096;
-					}
-					else if (phys == run_end)
-					{
-						run_end += 4096;
-					}
-					else
-					{
-						memory::buddy.reserve_range(
-						    run_start, run_end);
-						total_reserved +=
-						    (run_end - run_start) /
-						    4096;
-						run_start = phys;
-						run_end = phys + 4096;
-					}
-				}
-				if (run_end > run_start)
-				{
-					memory::buddy.reserve_range(run_start,
-								    run_end);
-					total_reserved +=
-					    (run_end - run_start) / 4096;
-				}
-			}
+			p_vaddr |= static_cast<std::uint64_t>(ph[16 + b]) << (8 * b);
+			p_memsz |= static_cast<std::uint64_t>(ph[40 + b]) << (8 * b);
 		}
+
+		std::uint64_t seg_end = p_vaddr + p_memsz;
+		if (seg_end > end)
+			end = seg_end;
 	}
 
-#ifdef DEBUG
-	LOG("reserved_kernel_pages=%llu", total_reserved);
-#endif
+	if (end <= virtual_base)
+		return 0;
+
+	std::uint64_t size = end - virtual_base;
+	return (size + memory::PAGE_SIZE - 1) &
+	       ~(static_cast<std::uint64_t>(memory::PAGE_SIZE) - 1);
 }
 
 static std::uint8_t* alloc_boot_pages(int order, const char* name)
@@ -266,15 +215,27 @@ extern "C" void kmain(void)
 #endif
 	std::uint64_t kernel_phys = 0;
 	kernel_phys = exec_addr_request.response->physical_base;
+	std::uint64_t kernel_virt = exec_addr_request.response->virtual_base;
 #ifdef DEBUG
-	LOG("kernel_phys=0x%016llx", kernel_phys);
+	LOG("kernel_phys=0x%016llx; kernel_virt=0x%016llx", kernel_phys,
+	    kernel_virt);
+#endif
+
+	std::uint64_t kernel_size = 0;
+	if (exec_file_request.response != nullptr &&
+	    exec_file_request.response->executable_file != nullptr)
+	{
+		kernel_size = elf_kernel_size(
+		    exec_file_request.response->executable_file->address,
+		    kernel_virt);
+	}
+#ifdef DEBUG
+	LOG("kernel_size=%llu_kib", kernel_size / 1024);
 #endif
 
 	memory::buddy.init(memmap_request.response->entries,
 			   memmap_request.response->entry_count, kernel_phys,
-			   kernel_phys ? 0x4E000ULL : 0);
-
-	reserve_kernel_pages();
+			   kernel_size);
 
 	memory::buddy.log_stats();
 
@@ -312,12 +273,14 @@ extern "C" void kmain(void)
 
 	interrupts::apic::init_all();
 
-	interrupts::apic::apic.timer_periodic(1000, 48);
+	interrupts::apic::apic.timer_periodic(
+	    1000, static_cast<std::uint8_t>(interrupts::idt::LAPIC_TIMER_VECTOR));
 
 	smp::wake_aps(mp_request.response);
 
 	interrupts::apic::apic.enable_x2apic();
-	interrupts::apic::apic.timer_periodic(1000, 48);
+	interrupts::apic::apic.timer_periodic(
+	    1000, static_cast<std::uint8_t>(interrupts::idt::LAPIC_TIMER_VECTOR));
 
 	tsc::tsc.init();
 
@@ -340,6 +303,30 @@ extern "C" void kmain(void)
 	else
 	{
 		LOG("ahci_read_sector_failed");
+	}
+
+	// exercise the block-layer write path: write a known pattern to the
+	// final sector and read it back straight from the device
+	block::device* disk = block::device_get(0);
+	if (disk != nullptr && disk->block_count > 1)
+	{
+		std::uint8_t wbuf[512];
+		std::uint8_t rbuf[512];
+		for (int i = 0; i < 512; ++i)
+			wbuf[i] = static_cast<std::uint8_t>(i);
+
+		std::uint64_t last = disk->block_count - 1;
+		bool ok = disk->write(disk, last, 1, wbuf) &&
+			  disk->raw_read(disk, last, 1, rbuf) &&
+			  memory::memcmp(wbuf, rbuf, 512) == 0;
+		LOG("ahci_write_read_%s; blocks=%llu; last=%llu",
+		    ok ? "ok" : "failed",
+		    static_cast<std::uint64_t>(disk->block_count),
+		    static_cast<std::uint64_t>(last));
+	}
+	else
+	{
+		LOG("ahci_block_device_unavailable");
 	}
 
 	// tests

@@ -2,7 +2,9 @@
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
 #include <memory/slub.hpp>
+#include <sched/condvar.hpp>
 #include <sched/deadline.hpp>
+#include <sched/mutex.hpp>
 #include <sched/realtime.hpp>
 #include <sched/round_robin.hpp>
 #include <sched/sched.hpp>
@@ -215,8 +217,112 @@ BuddyAllocatorTest buddy_allocator_test;
 SlubAllocatorTest slub_allocator_test;
 SchedulerQueuesTest scheduler_queues_test;
 
+namespace
+{
+
+// Shared state for the thread tests. volatile because the value is written
+// by a worker thread and read after a context switch back to the test thread.
+volatile bool scheduler_worker_ran = false;
+volatile bool condvar_worker_ran = false;
+volatile bool condvar_worker_done = false;
+volatile bool condvar_predicate = false;
+
+sched::Mutex test_mutex;
+sched::CondVar test_condvar;
+
+void scheduler_worker_entry(void)
+{
+	scheduler_worker_ran = true;
+}
+
+void condvar_worker_entry(void)
+{
+	test_mutex.lock();
+	while (!condvar_predicate)
+		test_condvar.wait(test_mutex);
+	condvar_worker_ran = true;
+	test_mutex.unlock();
+	condvar_worker_done = true;
+}
+
+class SchedulerSleepTest final : public Test {
+public:
+	const char* name() const override
+	{
+		return "scheduler_sleep";
+	}
+
+	bool run() override
+	{
+		std::uint64_t before = sched::ticks_since_boot;
+		sched::scheduler.sleep(50);
+		std::uint64_t after = sched::ticks_since_boot;
+		TEST_ASSERT(after - before >= 50);
+		return true;
+	}
+};
+
+class SchedulerThreadsTest final : public Test {
+public:
+	const char* name() const override
+	{
+		return "scheduler_threads";
+	}
+
+	bool run() override
+	{
+		sched::thread* t = sched::scheduler.create_thread(
+		    scheduler_worker_entry, sched::Policy::NORMAL);
+		TEST_ASSERT(t != nullptr);
+
+		// switch to the worker; it sets the flag and exits itself
+		sched::scheduler.yield();
+		TEST_ASSERT(scheduler_worker_ran);
+
+		// one more scheduling step reaps the exited worker
+		sched::scheduler.yield();
+		return true;
+	}
+};
+
+class MutexCondvarTest final : public Test {
+public:
+	const char* name() const override
+	{
+		return "mutex_condvar";
+	}
+
+	bool run() override
+	{
+		sched::scheduler.create_thread(condvar_worker_entry,
+					       sched::Policy::NORMAL);
+
+		// let the worker acquire the mutex and park on the condvar
+		sched::scheduler.yield();
+
+		condvar_predicate = true;
+		test_condvar.signal();
+
+		// let the worker run to completion and exit
+		sched::scheduler.yield();
+		sched::scheduler.yield();
+
+		TEST_ASSERT(condvar_worker_ran);
+		TEST_ASSERT(condvar_worker_done);
+		return true;
+	}
+};
+
+SchedulerSleepTest scheduler_sleep_test;
+SchedulerThreadsTest scheduler_threads_test;
+MutexCondvarTest mutex_condvar_test;
+
+} // namespace
+
 Test* all_tests[] = {&memory_functions_test, &buddy_allocator_test,
-		     &slub_allocator_test, &scheduler_queues_test};
+		     &slub_allocator_test, &scheduler_queues_test,
+		     &scheduler_sleep_test, &scheduler_threads_test,
+		     &mutex_condvar_test};
 
 } // namespace
 

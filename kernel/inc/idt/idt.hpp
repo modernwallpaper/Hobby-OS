@@ -8,6 +8,14 @@ namespace interrupts
 namespace idt
 {
 
+// Fixed IDT vectors for kernel-internal interrupts. The LAPIC timer and the
+// scheduler's yield software interrupt are wired as interrupt gates, so their
+// numbers must stay in sync with the stub assembly and the APIC setup.
+static constexpr std::uint64_t LAPIC_TIMER_VECTOR = 48;
+static constexpr std::uint64_t YIELD_VECTOR = 0xFE;
+// Device IRQ vectors live in 0x40..0x5F (see ext_irq_table / DEVICE_IRQ_VECTOR).
+static constexpr std::uint64_t DEVICE_IRQ_BASE = 0x40;
+
 struct entry {
 	std::uint16_t offset_low; // offset bits 0..15
 	std::uint16_t selector;	  // a code segment selector in GDT or LDT
@@ -53,6 +61,14 @@ public:
 extern IDT idt;
 extern "C" frame* isr_handler(frame* frame);
 extern "C" void irq_handler(frame* frame);
+
+// linked-list node for one registered handler. Multiple drivers can register
+// on the same vector (e.g. devices sharing a PCI INTx line); irq_handler()
+// runs every handler in the chain so each one can check its own status.
+struct irq_handler_entry {
+	void (*handler)(frame*);
+	irq_handler_entry* next;
+};
 
 void register_irq_handler(int vector, void (*handler)(frame*));
 

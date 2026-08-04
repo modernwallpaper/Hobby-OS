@@ -121,7 +121,10 @@ ifeq ($(ARCH),x86_64)
     # Internal nasm flags that should not be changed by the user.
     override NASMFLAGS := \
         $(patsubst -g,-g -F dwarf,$(NASMFLAGS)) \
-        -Wall
+        -Wall \
+        -DLAPIC_TIMER_VECTOR=48 \
+        -DYIELD_VECTOR=0xFE \
+        -DDEVICE_IRQ_BASE=0x40
 endif
 
 # Architecture specific internal flags.

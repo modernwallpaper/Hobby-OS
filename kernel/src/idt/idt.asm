@@ -96,13 +96,13 @@ isr_unhandled:
 global lapic_timer_stub
 lapic_timer_stub:
     push 0
-    push 48
+    push LAPIC_TIMER_VECTOR
     jmp isr_common
 
 global yield_stub
 yield_stub:
     push 0
-    push 0xFE
+    push YIELD_VECTOR
     jmp isr_common
 
 ; Macro for hardware IRQ stubs (mapped to vectors 32-47)
@@ -138,7 +138,7 @@ irq_stub 15
 global ext_irq%1
 ext_irq%1:
     push 0
-    push 0x40 + %1
+    push DEVICE_IRQ_BASE + %1
     jmp isr_common
 %endmacro
 

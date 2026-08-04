@@ -189,9 +189,9 @@ void device_register(device* dev)
 		}
 	}
 
-	if (!dev->raw_read)
+	if (!dev->read)
 		dev->read = cached_read;
-	if (!dev->raw_write)
+	if (!dev->write)
 		dev->write = cached_write;
 
 	std::uint64_t flags;
@@ -224,7 +224,7 @@ void device_register(device* dev)
 		block_capacity = new_cap;
 	}
 
-	block_devices[++block_count] = dev;
+	block_devices[block_count++] = dev;
 	block_lock.unlock_restore(flags);
 #ifdef DEBUG
 	LOG("count_blocks_registered=%lu; bytes_per_block=%u",

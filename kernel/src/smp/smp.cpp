@@ -1,6 +1,7 @@
 #include <acpi/acpi.hpp>
 #include <apic/apic.hpp>
 #include <gdt/gdt.hpp>
+#include <idt/idt.hpp>
 #include <logging/logger.hpp>
 #include <memory/buddy.hpp>
 #include <memory/memory.hpp>
@@ -116,7 +117,9 @@ extern "C" void ap_entry(struct limine_mp_info* info)
 
 	interrupts::apic::apic.init(acpi::acpi.lapic_address);
 	interrupts::apic::apic.enable_x2apic();
-	interrupts::apic::apic.timer_periodic(1000, 48);
+	interrupts::apic::apic.timer_periodic(
+	    1000,
+	    static_cast<std::uint8_t>(interrupts::idt::LAPIC_TIMER_VECTOR));
 
 #ifdef DEBUG
 	LOG("ap=%u; apic_id=0x%x; online=true", cpu_id,

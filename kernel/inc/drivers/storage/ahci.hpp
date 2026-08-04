@@ -27,6 +27,10 @@ namespace ahci
 #define HBA_PORT_IPM_ACTIVE 1
 #define HBA_PORT_DET_PRESENT 3
 
+// PxSCTL.DET: serial-ATA reset / device-detection control
+#define HBA_PxSCTL_DET_MASK 0x0000000F
+#define HBA_PxSCTL_DET_RESET 0x00000001 // force COMRESET
+
 #define HBA_PxCMD_ST 0x0001
 #define HBA_PxCMD_IE 0x0002
 #define HBA_PxCMD_FRE 0x0010
@@ -41,6 +45,8 @@ namespace ahci
 #define HBA_PxIS_TFES 0x40000000
 
 #define ATA_CMD_READ_DMA_EXT 0x25
+#define ATA_CMD_WRITE_DMA_EXT 0x35
+#define ATA_CMD_IDENTIFY_DEVICE 0xEC
 
 // fixed IDT vector used for the controller (MSI or INTx). It lives inside the
 // device-IRQ window (0x40..0x5F) that the IDT wires up as dispatchable gates.
@@ -50,6 +56,8 @@ static constexpr std::uint8_t DEVICE_IRQ_VECTOR = 0x50;
 static constexpr std::uint64_t CONTROLLER_TIMEOUT_US = 1000000;
 // timeout for per-port command-list state transitions
 static constexpr std::uint64_t PORT_TIMEOUT_US = 100000;
+// number of times a command is re-issued before the port is fully reset
+static constexpr int MAX_RETRIES = 3;
 
 enum class fis_type {
 	FIS_TYPE_REG_H2D = 0x27,
@@ -262,8 +270,9 @@ struct port_state {
 	std::uint64_t block_count;
 	std::uint32_t block_size;
 	block::device bdev;
-	std::uint32_t slots_issued;
-	std::uint32_t slots_done;
+	volatile std::uint32_t slots_issued;
+	volatile std::uint32_t slots_done;
+	volatile bool tfes;
 	sync::Spinlock lock;
 };
 
@@ -291,8 +300,9 @@ private:
 	bool use_msi;
 	std::uint8_t irq_vector;
 
-	// set by the ISR when a port interrupt arrives while a command is in flight
-	volatile bool irq_fired;
+	// per-port state for all 32 possible ports; a port is only live when
+	// its `present` flag is set
+	port_state ports[32];
 
 	// IDE
 	std::uint64_t primary_io_base;
@@ -305,21 +315,40 @@ private:
 	static constexpr std::uint8_t AHCI_ATA_SUBCLASS = 0x06;
 	static constexpr std::uint8_t AHCI_IDE_SUBCLASS = 0x01;
 	static constexpr std::uint8_t AHCI_PROG_IF = 0x01;
+	static constexpr int MAX_PORTS = 32;
 
 	void bohc_handoff(volatile hba_mem* abar);
 	void probe_port(volatile hba_mem* abar);
 	int check_type(volatile hba_port* port);
-	void port_rebase(volatile hba_port* port, int port_number);
+	void port_rebase(port_state* p);
 	void start_cmd(volatile hba_port* port);
 	void stop_cmd(volatile hba_port* port);
 	void reset_controller(volatile hba_mem* abar);
+	void port_rearm(port_state* p);
+	void port_recover(port_state* p);
+	bool port_reset(port_state* p);
 
 	bool msi_enable(void);
 	void intx_setup(void);
 
+	void register_device(port_state* p);
+	bool identify(port_state* p, std::uint8_t* out);
+	int alloc_slot(port_state* p);
+	bool issue_command(port_state* p, std::uint64_t lba,
+			   std::uint32_t sectors, dma::addr dma_buf,
+			   std::uint8_t command, bool to_device);
+	bool transfer(port_state* p, std::uint64_t lba, std::uint32_t sectors,
+		      void* buf, bool to_device);
+	bool wait_slot(port_state* p, std::uint32_t mask,
+		       std::uint64_t timeout_us);
+
 public:
 	void init(void);
-	void irq(void);
+	bool irq(void);
+	bool read(port_state* p, std::uint64_t lba, std::uint32_t count,
+		  void* buf);
+	bool write(port_state* p, std::uint64_t lba, std::uint32_t count,
+		   const void* buf);
 	// read one 512-byte sector from a SATA port into buf; blocks until the
 	// completion interrupt fires (or a timeout), proving IRQ delivery
 	bool read_sector(int port_num, std::uint64_t lba, void* buf);

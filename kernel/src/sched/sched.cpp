@@ -11,48 +11,42 @@ extern "C" void idle_loop(void);
 namespace sched
 {
 
+std::uint64_t ticks_since_boot = 0;
+
 Scheduler scheduler;
 
-void Scheduler::init(void)
+namespace
 {
+
+// Context-switch entry point for freshly created threads. The thread starts
+// executing here (the initial frame's RIP points at this function) with a
+// fresh stack. Once the user entry returns the thread is dead and must be
+// reaped; the scheduler parks it in the graveyard and switches away.
+extern "C" void thread_entry_trampoline(void)
+{
+	thread* t = current_thread();
+	if (t && t->entry)
+		t->entry();
+	scheduler.exit();
+}
+
+} // namespace
+
+void Runqueue::init(std::uint64_t cpu)
+{
+	this->cpu = cpu;
+	this->idle_thread = nullptr;
 	this->rr_sched.init();
 	this->deadline_sched.init();
 	this->realtime_sched.init();
-	this->idle_sched.init();
-
-	smp::cpu_info* bsp = smp::this_cpu();
-
-	thread* initial =
-	    static_cast<thread*>(memory::slub.kmalloc(sizeof(thread)));
-	if (!initial)
-		PANIC("sched_init: kmalloc failed");
-
-	initial->state = TaskState::RUNNING;
-	initial->policy = Policy::NORMAL;
-	initial->rsp = nullptr;
-	initial->kernel_stack_base = nullptr;
-	initial->next = nullptr;
-	initial->remaining_ticks = DEFAULT_TIMESLICE;
-	initial->cpu = bsp->cpu_id;
-
-	bsp->current_thread = initial;
-
-	for (std::uint64_t i = 0; i < smp::MAX_CPUS; i++)
-	{
-		smp::cpu_info* cpu = &smp::cpu_infos[i];
-		if (cpu == bsp)
-			continue;
-
-		thread* idle = this->idle_sched.get_idle(i);
-		if (idle)
-		{
-			idle->state = TaskState::RUNNING;
-			cpu->current_thread = idle;
-		}
-	}
 }
 
-void Scheduler::enqueue(thread* t)
+void Runqueue::set_idle(thread* t)
+{
+	this->idle_thread = t;
+}
+
+void Runqueue::enqueue(thread* t)
 {
 	t->state = TaskState::READY;
 
@@ -72,7 +66,7 @@ void Scheduler::enqueue(thread* t)
 	}
 }
 
-thread* Scheduler::pick_next(void)
+thread* Runqueue::pick_next(void)
 {
 	thread* t;
 
@@ -91,28 +85,192 @@ thread* Scheduler::pick_next(void)
 	return this->get_idle();
 }
 
-thread* Scheduler::get_idle(void)
+thread* Runqueue::get_idle(void)
 {
-	return this->idle_sched.get_idle(smp::this_cpu()->cpu_id);
+	return this->idle_thread;
+}
+
+void SleepQueue::init(void)
+{
+	this->head = nullptr;
+}
+
+void SleepQueue::insert(thread* t)
+{
+	std::uint64_t flags;
+	this->lock.lock_save(flags);
+
+	t->state = TaskState::SLEEPING;
+	t->wait_next = nullptr;
+
+	if (!this->head || t->wake_tick < this->head->wake_tick)
+	{
+		t->wait_next = this->head;
+		this->head = t;
+		this->lock.unlock_restore(flags);
+		return;
+	}
+
+	thread* prev = this->head;
+	while (prev->wait_next &&
+	       prev->wait_next->wake_tick <= t->wake_tick)
+		prev = prev->wait_next;
+
+	t->wait_next = prev->wait_next;
+	prev->wait_next = t;
+
+	this->lock.unlock_restore(flags);
+}
+
+bool SleepQueue::remove(thread* t)
+{
+	std::uint64_t flags;
+	this->lock.lock_save(flags);
+
+	thread* prev = nullptr;
+	for (thread* cur = this->head; cur; prev = cur, cur = cur->wait_next)
+	{
+		if (cur == t)
+		{
+			if (prev)
+				prev->wait_next = cur->wait_next;
+			else
+				this->head = cur->wait_next;
+			cur->wait_next = nullptr;
+			this->lock.unlock_restore(flags);
+			return true;
+		}
+	}
+
+	this->lock.unlock_restore(flags);
+	return false;
+}
+
+void SleepQueue::wake_expired(std::uint64_t now, Runqueue& rq)
+{
+	std::uint64_t flags;
+	this->lock.lock_save(flags);
+
+	// The queue is sorted by wake tick, so all expired threads are at the
+	// head. Re-enqueue them while still holding the sleep queue lock: it is
+	// the only place that dequeues, and lock order is always sleep queue ->
+	// run queue, so this cannot deadlock against the scheduling fast path.
+	thread* w = this->head;
+	while (w && w->wake_tick <= now)
+	{
+		this->head = w->wait_next;
+		w->wait_next = nullptr;
+		rq.enqueue(w);
+		w = this->head;
+	}
+
+	this->lock.unlock_restore(flags);
+}
+
+void Scheduler::init(void)
+{
+	this->idle_sched.init();
+
+	for (std::uint64_t i = 0; i < smp::MAX_CPUS; i++)
+	{
+		this->runqueues[i].init(i);
+		this->runqueues[i].set_idle(this->idle_sched.get_idle(i));
+		this->sleep_queues[i].init();
+	}
+	this->graveyard = nullptr;
+
+	smp::cpu_info* bsp = smp::this_cpu();
+
+	thread* initial =
+	    static_cast<thread*>(memory::slub.kmalloc(sizeof(thread)));
+	if (!initial)
+		PANIC("sched_init: kmalloc failed");
+
+	initial->state = TaskState::RUNNING;
+	initial->policy = Policy::NORMAL;
+	initial->rsp = nullptr;
+	initial->kernel_stack_base = nullptr;
+	initial->next = nullptr;
+	initial->remaining_ticks = DEFAULT_TIMESLICE;
+	initial->cpu = bsp->cpu_id;
+	initial->deadline = 0;
+	initial->wake_tick = 0;
+	initial->wait_next = nullptr;
+	initial->entry = nullptr;
+	initial->stack_owned = false;
+
+	bsp->current_thread = initial;
+
+	for (std::uint64_t i = 0; i < smp::MAX_CPUS; i++)
+	{
+		smp::cpu_info* cpu = &smp::cpu_infos[i];
+		if (cpu == bsp)
+			continue;
+
+		thread* idle = this->runqueues[i].get_idle();
+		if (idle)
+		{
+			idle->state = TaskState::RUNNING;
+			cpu->current_thread = idle;
+		}
+	}
+}
+
+void Scheduler::enqueue(thread* t)
+{
+	if (!t || t->cpu >= smp::MAX_CPUS)
+		return;
+	this->runqueues[t->cpu].enqueue(t);
+}
+
+thread* Scheduler::pick_next(void)
+{
+	return this->runqueues[smp::this_cpu()->cpu_id].pick_next();
+}
+
+void Scheduler::graveyard_push(thread* t)
+{
+	std::uint64_t flags;
+	this->graveyard_lock.lock_save(flags);
+	t->next = this->graveyard;
+	this->graveyard = t;
+	this->graveyard_lock.unlock_restore(flags);
+}
+
+void Scheduler::reap_graveyard(void)
+{
+	std::uint64_t flags;
+	this->graveyard_lock.lock_save(flags);
+	thread* g = this->graveyard;
+	this->graveyard = nullptr;
+	this->graveyard_lock.unlock_restore(flags);
+
+	while (g)
+	{
+		thread* next = g->next;
+		if (g->stack_owned && g->kernel_stack_base)
+			memory::buddy.free_page(
+			    memory::virt_to_phys(g->kernel_stack_base), 1);
+		memory::slub.kfree(g);
+		g = next;
+	}
 }
 
 // Run one scheduling step. Called only from interrupt context (timer tick or
-// the yield software interrupt), where IF is already cleared by the interrupt
-// gate. The scheduler lock is therefore always acquired with IF disabled:
-// no interrupt can re-enter the scheduler while a CPU holds it, so an ISR can
-// never spin on a lock held by the very thread it interrupted.
-//
-// The global lock serializes the enqueue-then-pick decision (lock order is
-// always global -> per-queue, so no lock-order inversion is possible).
+// the yield software interrupt), where IF is already cleared. The scheduler
+// owns no lock of its own here: the fast path operates on the current CPU's
+// Runqueue, whose sub-queues each take their own interrupt-safe lock only for
+// the duration of a single enqueue/dequeue. No lock is held across the pick
+// decision or across the context switch, and no global scheduler lock exists
+// to serialize or deadlock on.
 interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
 					    bool preempt)
 {
+	this->reap_graveyard();
+
 	thread* current = current_thread();
 	if (!current)
 		return f;
-
-	std::uint64_t flags;
-	this->lock.lock_save(flags);
 
 	current->rsp = reinterpret_cast<std::uint64_t*>(f);
 
@@ -128,24 +286,35 @@ interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
 		requeue = true;
 	}
 
-	// The current thread still has CPU time left, so it keeps the CPU. Do not
-	// switch away, otherwise a thread that is RUNNING but not in any run queue
-	// (e.g. the boot thread before it is enqueued) would be stranded forever
-	// and the machine would fall into the idle loop mid-boot.
+	// The current thread still has CPU time left, so it keeps the CPU. Do
+	// not switch away, otherwise a thread that is RUNNING but not in any
+	// run queue (e.g. the boot thread before it is enqueued) would be
+	// stranded forever and the machine would fall into the idle loop
+	// mid-boot.
 	if (!requeue)
-	{
-		this->lock.unlock_restore(flags);
 		return f;
-	}
 
-	if (current->policy != Policy::IDLE &&
-	    current->state != TaskState::DEAD)
+	std::uint64_t cpu = smp::this_cpu()->cpu_id;
+
+	// Requeue only threads that are actually runnable. SLEEPING threads
+	// are parked on a wait queue and must not be enqueued; DEAD threads go
+	// to the graveyard to be reaped once we have switched away from their
+	// stack. IDLE threads are not members of any run queue.
+	if (current->state == TaskState::READY ||
+	    current->state == TaskState::RUNNING)
 	{
-		current->remaining_ticks = DEFAULT_TIMESLICE;
-		this->enqueue(current);
+		if (current->policy != Policy::IDLE)
+		{
+			current->remaining_ticks = DEFAULT_TIMESLICE;
+			this->runqueues[cpu].enqueue(current);
+		}
+	}
+	else if (current->state == TaskState::DEAD)
+	{
+		this->graveyard_push(current);
 	}
 
-	thread* next = this->pick_next();
+	thread* next = this->runqueues[cpu].pick_next();
 
 	if (next && next != current)
 	{
@@ -156,19 +325,24 @@ interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
 
 		next->state = TaskState::RUNNING;
 		smp::this_cpu()->current_thread = next;
-		this->lock.unlock_restore(flags);
 		return reinterpret_cast<interrupts::idt::frame*>(next->rsp);
 	}
 
 	if (current->policy == Policy::IDLE)
 		current->remaining_ticks = 1;
 
-	this->lock.unlock_restore(flags);
 	return f;
 }
 
 interrupts::idt::frame* Scheduler::tick(interrupts::idt::frame* f)
 {
+	__atomic_fetch_add(&ticks_since_boot, 1, __ATOMIC_RELAXED);
+
+	std::uint64_t cpu = smp::this_cpu()->cpu_id;
+	this->sleep_queues[cpu].wake_expired(
+	    __atomic_load_n(&ticks_since_boot, __ATOMIC_RELAXED),
+	    this->runqueues[cpu]);
+
 	return this->schedule(f, true);
 }
 
@@ -182,6 +356,39 @@ void Scheduler::yield(void)
 	asm volatile("int $0xFE");
 }
 
+void Scheduler::sleep(std::uint64_t ticks)
+{
+	thread* t = current_thread();
+	if (!t)
+		return;
+
+	t->wake_tick =
+	    __atomic_load_n(&ticks_since_boot, __ATOMIC_RELAXED) + ticks;
+	this->sleep_queues[smp::this_cpu()->cpu_id].insert(t);
+	this->yield();
+}
+
+void Scheduler::wake(thread* t)
+{
+	if (!t || t->cpu >= smp::MAX_CPUS)
+		return;
+
+	if (this->sleep_queues[t->cpu].remove(t))
+		this->runqueues[t->cpu].enqueue(t);
+}
+
+[[noreturn]] void Scheduler::exit(void)
+{
+	thread* t = current_thread();
+	if (t)
+		t->state = TaskState::DEAD;
+
+	this->yield();
+
+	for (;;)
+		asm volatile("hlt");
+}
+
 thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 				 std::uint64_t cpu, std::uint64_t deadline)
 {
@@ -193,13 +400,15 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	std::uint64_t stack_top = reinterpret_cast<std::uint64_t>(stack) + 8192;
 	std::uint64_t* sp = reinterpret_cast<std::uint64_t*>(stack_top);
 
-	*--sp = 0x10; // SS (kernel data segment)
+	// Build an interrupt frame that will start the trampoline via iretq
+	// (see isr_common in idt.asm for the exact layout).
+	*--sp = 0x10;					  // SS
 	*--sp = reinterpret_cast<std::uint64_t>(stack_top); // RSP
-	*--sp = 0x202;					    // RFLAGS
-	*--sp = 0x08;					    // CS
-	*--sp = reinterpret_cast<std::uint64_t>(entry);	    // RIP
-	*--sp = 0;					    // error code
-	*--sp = 0xFF;					    // vector
+	*--sp = 0x202;					  // RFLAGS
+	*--sp = 0x08;					  // CS
+	*--sp = reinterpret_cast<std::uint64_t>(&thread_entry_trampoline); // RIP
+	*--sp = 0;				    // error code
+	*--sp = 0xFF;				    // vector
 	for (int i = 0; i < 15; i++)
 		*--sp = 0;
 
@@ -215,11 +424,12 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	t->remaining_ticks = DEFAULT_TIMESLICE;
 	t->cpu = cpu;
 	t->deadline = deadline;
+	t->wake_tick = 0;
+	t->wait_next = nullptr;
+	t->entry = entry;
+	t->stack_owned = true;
 
-	std::uint64_t flags;
-	this->lock.lock_save(flags);
-	this->enqueue(t);
-	this->lock.unlock_restore(flags);
+	this->runqueues[cpu].enqueue(t);
 
 	return t;
 }

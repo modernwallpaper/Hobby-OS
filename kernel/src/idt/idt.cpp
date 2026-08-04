@@ -1,6 +1,8 @@
 #include <apic/apic.hpp>
 #include <idt/idt.hpp>
 #include <logging/logger.hpp>
+#include <memory/slub.hpp>
+#include <panic/panic.hpp>
 #include <sched/sched.hpp>
 
 namespace interrupts
@@ -114,13 +116,30 @@ static void (*irq_table[16])(void) = {irq0,  irq1,  irq2,  irq3, irq4,	irq5,
 				      irq6,  irq7,  irq8,  irq9, irq10, irq11,
 				      irq12, irq13, irq14, irq15};
 
-static void (*irq_handler_table[256])(frame*) = {};
+static interrupts::idt::irq_handler_entry* irq_handler_table[256] = {};
 
 void register_irq_handler(int vector, void (*handler)(frame*))
 {
-	if (vector < 0 || vector >= 256)
+	if (vector < 0 || vector >= 256 || handler == nullptr)
 		return;
-	irq_handler_table[vector] = handler;
+	auto* entry = static_cast<interrupts::idt::irq_handler_entry*>(
+	    memory::slub.kmalloc(
+		sizeof(interrupts::idt::irq_handler_entry)));
+	entry->handler = handler;
+	entry->next = nullptr;
+
+	// keep every handler registered on this vector: a shared INTx line
+	// delivers the same vector to all devices on it, and each driver
+	// checks its own pending status and services only itself
+	if (irq_handler_table[vector] == nullptr)
+	{
+		irq_handler_table[vector] = entry;
+		return;
+	}
+	interrupts::idt::irq_handler_entry* cur = irq_handler_table[vector];
+	while (cur->next != nullptr)
+		cur = cur->next;
+	cur->next = entry;
 }
 
 // main interrupt handler: dispatch exceptions and IRQs
@@ -129,45 +148,51 @@ extern "C" frame* isr_handler(frame* frame)
 	// #ifdef DEBUG
 	// 	LOG("vector=%x", frame->vector);
 	// #endif
-	if (frame->vector == 48)
+	if (frame->vector == LAPIC_TIMER_VECTOR)
 	{
 		apic::apic.eoi();
 		apic::apic.timer_oneshot_periodic_tick();
 		return sched::scheduler.tick(frame);
 	}
-	else if (frame->vector == 0xFE)
+	else if (frame->vector == YIELD_VECTOR)
 	{
 		return sched::scheduler.yield(frame);
 	}
 	else if (frame->vector >= 32 && frame->vector < 256 &&
-		 (frame->vector <= 47 ||
+		 (frame->vector <= DEVICE_IRQ_BASE + 15 ||
 		  irq_handler_table[frame->vector] != nullptr))
 	{
 		irq_handler(frame);
 	}
-	else if (frame->vector == 0)
+	else if (frame->vector < 32)
 	{
-#ifdef DEBUG
-		LOG("divide_by_zero; rip=%x", frame->rip);
-#endif
+		// CPU exceptions are (almost) never recoverable. Faults like #PF/#GP
+		// caused by a wild pointer in a driver will otherwise re-trigger
+		// forever, making the machine appear hung. Panic instead.
+		PANIC("unhandled_exception; rip=%p; rsp=%p; vector=%llu; error=%p; "
+		      "cs=%llx; rflags=%llx; rax=%p; rbx=%p; rcx=%p; rdx=%p; "
+		      "rsi=%p; rdi=%p",
+		      frame->rip, frame->rsp, frame->vector, frame->error,
+		      frame->cs, frame->rflags, frame->rax, frame->rbx,
+		      frame->rcx, frame->rdx, frame->rsi, frame->rdi);
 	}
 	else
 	{
 #ifdef DEBUG
-		LOG("unhandled_exception; rip=%x; rsp=%x; vector=%d; error=%x; "
-		    "cs=%x; rflags=%x",
-		    frame->rip, frame->rsp, frame->vector, frame->error,
-		    frame->cs, frame->rflags);
+		LOG("unhandled_interrupt; rip=%p; vector=%llu",
+		    frame->rip, frame->vector);
 #endif
 	}
 	return frame;
 }
 
-// IRQ handler: dispatch device handler, then send EOI to the APIC
+// IRQ handler: run every handler registered for this vector (a vector may be
+// shared by several devices), then send EOI to the APIC
 extern "C" void irq_handler(frame* frame)
 {
-	if (irq_handler_table[frame->vector] != nullptr)
-		irq_handler_table[frame->vector](frame);
+	for (auto* cur = irq_handler_table[frame->vector]; cur != nullptr;
+	     cur = cur->next)
+		cur->handler(frame);
 	apic::apic.eoi();
 }
 
@@ -183,10 +208,10 @@ void IDT::init(void)
 
 	for (int i = 48; i < 256; ++i)
 	{
-		if (i == 48)
+		if (i == LAPIC_TIMER_VECTOR)
 			this->set_gate(
 			    i, reinterpret_cast<void*>(lapic_timer_stub));
-		else if (i == 0xFE)
+		else if (i == YIELD_VECTOR)
 			this->set_gate(i, reinterpret_cast<void*>(yield_stub));
 		else
 		{
@@ -198,7 +223,7 @@ void IDT::init(void)
 	// device IRQ gates must be wired after the 48..255 sweep above so the
 	// generic isr_unhandled gate does not overwrite them
 	for (int i = 0; i < 32; ++i)
-		this->set_gate(0x40 + i,
+		this->set_gate(DEVICE_IRQ_BASE + i,
 			       reinterpret_cast<void*>(ext_irq_table[i]));
 
 	this->set_ist(1, 1);
