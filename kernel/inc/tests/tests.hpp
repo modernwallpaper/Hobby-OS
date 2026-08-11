@@ -12,4 +12,4 @@ public:
 	virtual bool run() = 0;
 };
 
-} // namespace tests
+}

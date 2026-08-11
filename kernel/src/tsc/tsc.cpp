@@ -114,4 +114,4 @@ void TSC::udelay(std::uint64_t us)
 	}
 }
 
-} // namespace tsc
+}

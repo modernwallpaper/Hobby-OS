@@ -398,4 +398,4 @@ void Buddy::list_remove(std::uint64_t phys, int order)
 	}
 }
 
-} // namespace memory
+}

@@ -22,6 +22,6 @@ public:
 	thread* pick_next(void);
 };
 
-} // namespace deadline
+}
 
-} // namespace sched
+}

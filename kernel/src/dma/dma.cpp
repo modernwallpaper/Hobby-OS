@@ -102,4 +102,4 @@ void free(addr address, std::size_t size)
 	dma_spinlock.unlock_restore(flags);
 }
 
-} // namespace dma
+}

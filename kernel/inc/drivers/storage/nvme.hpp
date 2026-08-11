@@ -17,8 +17,8 @@ public:
 
 extern Nvme nvme;
 
-} // namespace nvme
+}
 
-} // namespace storage
+}
 
-} // namespace drivers
+}

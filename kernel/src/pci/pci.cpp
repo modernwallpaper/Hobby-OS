@@ -429,4 +429,4 @@ const char* Pci::class_name(std::uint8_t class_code, std::uint8_t subclass)
 	}
 }
 
-} // namespace pci
+}

@@ -221,4 +221,4 @@ std::uint32_t ACPI::resolve_irq(std::uint8_t irq)
 	return irq;
 }
 
-} // namespace acpi
+}

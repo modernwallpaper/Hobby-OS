@@ -26,10 +26,7 @@ void Mutex::lock(void)
 			return;
 		}
 
-		// Contended: park the caller on the wait queue and sleep until
-		// unlock() re-enqueues it. The state is set to SLEEPING while
-		// the mutex lock is held, so the scheduler will not requeue the
-		// thread if a timer interrupt fires before it reaches yield().
+		// Mark SLEEPING under the mutex lock to avoid timer requeue races.
 		me->state = TaskState::SLEEPING;
 		me->wait_next = nullptr;
 		if (this->wait_tail)
@@ -67,4 +64,4 @@ void Mutex::unlock(void)
 	this->spinlock.unlock_restore(flags);
 }
 
-} // namespace sched
+}

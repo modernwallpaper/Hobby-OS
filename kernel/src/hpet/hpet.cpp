@@ -75,6 +75,6 @@ std::uint64_t HPET::get_freq(void)
 	return this->frequency;
 }
 
-} // namespace hpet
+}
 
-} // namespace timers
+}

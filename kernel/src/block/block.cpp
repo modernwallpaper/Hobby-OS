@@ -257,4 +257,4 @@ void cache_invalidate(device* dev)
 	cache->lock.unlock_restore(flags);
 }
 
-} // namespace block
+}

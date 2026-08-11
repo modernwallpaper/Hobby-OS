@@ -139,4 +139,4 @@ public:
 
 extern Pci pci;
 
-} // namespace pci
+}

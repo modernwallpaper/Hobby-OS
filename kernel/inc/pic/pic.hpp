@@ -24,6 +24,6 @@ static inline void disable_pic(void)
 #endif
 }
 
-} // namespace pic
+}
 
-} // namespace interrupts
+}

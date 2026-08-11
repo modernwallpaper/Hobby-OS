@@ -54,6 +54,6 @@ thread* Realtime::pick_next(void)
 	return t;
 }
 
-} // namespace realtime
+}
 
-} // namespace sched
+}

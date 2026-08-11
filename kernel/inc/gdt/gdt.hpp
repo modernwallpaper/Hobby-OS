@@ -77,4 +77,4 @@ public:
 
 extern GDT gdt;
 
-} // namespace gdt
+}

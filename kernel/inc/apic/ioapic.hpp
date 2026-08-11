@@ -39,6 +39,6 @@ public:
 
 extern IOAPIC ioapic;
 
-} // namespace ioapic
+}
 
-} // namespace interrupts
+}

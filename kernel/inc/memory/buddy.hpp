@@ -82,4 +82,4 @@ public:
 
 extern Buddy buddy;
 
-} // namespace memory
+}

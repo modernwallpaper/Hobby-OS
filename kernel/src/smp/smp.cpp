@@ -229,4 +229,4 @@ void wake_aps(struct limine_mp_response* mp)
 #endif
 }
 
-} // namespace smp
+}

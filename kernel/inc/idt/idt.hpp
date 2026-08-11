@@ -72,6 +72,6 @@ struct irq_handler_entry {
 
 void register_irq_handler(int vector, void (*handler)(frame*));
 
-} // namespace idt
+}
 
-} // namespace interrupts
+}

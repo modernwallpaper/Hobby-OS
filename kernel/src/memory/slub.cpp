@@ -390,4 +390,4 @@ void SlubAllocator::kfree(void* ptr)
 	this->lock.unlock();
 }
 
-} // namespace memory
+}

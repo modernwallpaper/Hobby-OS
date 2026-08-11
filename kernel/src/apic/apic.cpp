@@ -19,7 +19,6 @@ APIC::APIC() : mode(Mode::XAPIC), base(nullptr), bus_frequency(0)
 {
 }
 
-// read a modelspecific register
 std::uint64_t APIC::rdmsr(std::uint32_t msr)
 {
 	std::uint32_t low, high;
@@ -27,7 +26,6 @@ std::uint64_t APIC::rdmsr(std::uint32_t msr)
 	return (static_cast<std::uint64_t>(high) << 32) | low;
 }
 
-// write a modelspecific register
 void APIC::wrmsr(std::uint32_t msr, std::uint64_t value)
 {
 	std::uint32_t low = static_cast<std::uint32_t>(value);
@@ -35,7 +33,6 @@ void APIC::wrmsr(std::uint32_t msr, std::uint64_t value)
 	__asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(msr));
 }
 
-// execute the CPUID instruction
 void APIC::cpuid(std::uint32_t leaf, std::uint32_t& eax, std::uint32_t& ebx,
 		 std::uint32_t& ecx, std::uint32_t& edx)
 {
@@ -44,35 +41,29 @@ void APIC::cpuid(std::uint32_t leaf, std::uint32_t& eax, std::uint32_t& ebx,
 			 : "a"(leaf));
 }
 
-// xAPIC register write via MMIO
 void APIC::xapic_reg_write(std::uint32_t offset, std::uint32_t value)
 {
 	this->base[offset / 4] = value;
 }
 
-// xAPIC register read via MMIO
 std::uint32_t APIC::xapic_reg_read(std::uint32_t offset)
 {
 	return this->base[offset / 4];
 }
 
-// x2APIC register write via MSR
 void APIC::x2apic_reg_write(std::uint32_t offset, std::uint32_t value)
 {
 	std::uint32_t msr = 0x800 + (offset >> 4);
 	this->wrmsr(msr, value);
 }
 
-// x2APIC register read via MSR
 std::uint32_t APIC::x2apic_reg_read(std::uint32_t offset)
 {
 	std::uint32_t msr = 0x800 + (offset >> 4);
 	return static_cast<std::uint32_t>(this->rdmsr(msr));
 }
 
-// dispatch register write to xAPIC or x2APIC based on hardware state
-// (reads IA32_APIC_BASE bit 10 directly instead of the shared software
-//  mode flag, because the flag can be set by a different CPU)
+// Use the MSR bit, not the shared mode flag; APs can change it.
 void APIC::reg_write(std::uint32_t offset, std::uint32_t value)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -81,7 +72,6 @@ void APIC::reg_write(std::uint32_t offset, std::uint32_t value)
 		this->xapic_reg_write(offset, value);
 }
 
-// dispatch register read to xAPIC or x2APIC based on hardware state
 std::uint32_t APIC::reg_read(std::uint32_t offset)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -90,7 +80,6 @@ std::uint32_t APIC::reg_read(std::uint32_t offset)
 		return this->xapic_reg_read(offset);
 }
 
-// initialize the local APIC: enable, map MMIO, program SVR/TPR/LVT
 void APIC::init(std::uint32_t lapic_phys_addr)
 {
 	this->mode = Mode::XAPIC;
@@ -109,8 +98,7 @@ void APIC::init(std::uint32_t lapic_phys_addr)
 		this->wrmsr(this->MSR_APIC_BASE, apic_base_msr);
 	}
 
-	// If the MSR reports a different address than our caller,
-	// trust the MSR (the CPU has already been configured by firmware)
+	// Firmware may have already moved the LAPIC base.
 	std::uint64_t msr_base = apic_base_msr & 0xFFFFFFFFFFFFF000ULL;
 	if (msr_base != lapic_phys_addr)
 	{
@@ -133,35 +121,24 @@ void APIC::init(std::uint32_t lapic_phys_addr)
 	LOG("base=%p; version=0x%x; id=0x%x", this->base, version, id);
 #endif
 
-	// Software Enable (SVR), vector 0xFF for spurious
 	this->reg_write(this->REG_SVR, 0xFF | this->SVR_ENABLE);
 #ifdef DEBUG
 	LOG("svr=0x%08x", this->reg_read(this->REG_SVR));
 #endif
 
-	// Task Priority; accept all interrupts
 	this->reg_write(this->REG_TPR, 0);
 
-	// Logical Destination: flat model
 	this->reg_write(this->REG_DFR, 0xFFFFFFFF);
 	this->reg_write(this->REG_LDR, 0x01000000);
 
-	// LVT entries
-	//   Timer:     masked, oneshot
 	this->reg_write(this->REG_LVT_TIMER,
 			this->LVT_MASKED | this->LVT_TIMER_ONESHOT);
-	//   Thermal:   masked
 	this->reg_write(this->REG_LVT_THERMAL, this->LVT_MASKED);
-	//   Performanceonitoring counters: masked
 	this->reg_write(this->REG_LVT_PMC, this->LVT_MASKED);
-	//   LINT0:     masked (legacy IRQ0 from PIC)
 	this->reg_write(this->REG_LVT_LINT0, this->LVT_MASKED);
-	//   LINT1:     masked (legacy IRQ1 from PIC)
 	this->reg_write(this->REG_LVT_LINT1, this->LVT_MASKED);
-	//   Error:     vector 0xFE, masked initially
 	this->reg_write(this->REG_LVT_ERROR, 0xFE | this->LVT_MASKED);
 
-	// Clear error register
 	this->reg_write(this->REG_ESR, 0);
 	this->reg_read(this->REG_ESR);
 
@@ -170,7 +147,6 @@ void APIC::init(std::uint32_t lapic_phys_addr)
 #endif
 }
 
-// switch from xAPIC to x2APIC mode (MSRbased access)
 bool APIC::enable_x2apic(void)
 {
 	std::uint32_t eax, ebx, ecx, edx;
@@ -184,13 +160,10 @@ bool APIC::enable_x2apic(void)
 		return false;
 	}
 
-	// Read the actual hardware state from IA32_APIC_BASE
-	// (the software mode flag may be stale since the global `apic` is shared
-	// across CPUs)
+	// Re-read hardware state; the shared mode flag may be stale on APs.
 	std::uint64_t apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
 	if ((apic_base_msr >> 10) & 1)
 	{
-		// Already in x2APIC mode; just ensure SVR is enabled
 		this->wrmsr(0x80F, 0xFF | this->SVR_ENABLE);
 		this->mode = Mode::X2APIC;
 		return true;
@@ -200,22 +173,17 @@ bool APIC::enable_x2apic(void)
 	LOG("enabling_x2apic");
 #endif
 
-	// Step 1: temporarily disable the LAPIC (clear SVR enable bit) via MMIO.
-	// Use the raw xAPIC accessors to bypass the mode-dispatch, because the
-	// shared software `mode` flag may still say X2APIC (set by an AP).
+	// Bypass mode dispatch while the shared mode flag may be stale.
 	this->xapic_reg_write(this->REG_SVR,
 			this->xapic_reg_read(this->REG_SVR) & ~this->SVR_ENABLE);
 
-	// Step 2: set x2APIC enable bit (bit 10) in IA32_APIC_BASE
 	apic_base_msr = this->rdmsr(this->MSR_APIC_BASE);
 	apic_base_msr |= (1 << 10); // x2APIC enable
 	apic_base_msr |= (1 << 11); // LAPIC enable
 	this->wrmsr(this->MSR_APIC_BASE, apic_base_msr);
 
-	// Step 3: switch to MSR-based access
 	this->mode = Mode::X2APIC;
 
-	// Step 4: reenable the LAPIC via MSR
 	this->reg_write(this->REG_SVR, 0xFF | this->SVR_ENABLE);
 
 #ifdef DEBUG
@@ -224,13 +192,11 @@ bool APIC::enable_x2apic(void)
 	return true;
 }
 
-// signal end of interrupt
 void APIC::eoi(void)
 {
 	this->reg_write(this->REG_EOI, 0);
 }
 
-// read the local APIC ID
 std::uint8_t APIC::get_id(void)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -239,20 +205,17 @@ std::uint8_t APIC::get_id(void)
 		return static_cast<std::uint8_t>(this->reg_read(this->REG_ID) >> 24);
 }
 
-// read the local APIC version
 std::uint8_t APIC::get_version(void)
 {
 	return static_cast<std::uint8_t>(this->reg_read(this->REG_VERSION) &
 					 0xFF);
 }
 
-// check if the local APIC is in x2APIC mode via hardware MSR
 bool APIC::is_x2apic_enabled(void) const
 {
 	return APIC::rdmsr(MSR_APIC_BASE) & (1 << 10);
 }
 
-// send an IPI to a specific APIC ID
 void APIC::send_ipi(std::uint8_t apic_id, std::uint8_t vector,
 		    std::uint32_t delivery_mode)
 {
@@ -275,7 +238,6 @@ void APIC::send_ipi(std::uint8_t apic_id, std::uint8_t vector,
 	}
 }
 
-// send an IPI to all other APICs
 void APIC::send_ipi_all(std::uint8_t vector, std::uint32_t delivery_mode)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -296,7 +258,6 @@ void APIC::send_ipi_all(std::uint8_t vector, std::uint32_t delivery_mode)
 	}
 }
 
-// send an IPI to self
 void APIC::send_ipi_self(std::uint8_t vector, std::uint32_t delivery_mode)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -316,7 +277,6 @@ void APIC::send_ipi_self(std::uint8_t vector, std::uint32_t delivery_mode)
 	}
 }
 
-// send a startup IPI to bring up an AP
 void APIC::send_startup_ipi(std::uint8_t apic_id, std::uint8_t vector)
 {
 	if (this->rdmsr(this->MSR_APIC_BASE) & (1 << 10))
@@ -338,7 +298,6 @@ void APIC::send_startup_ipi(std::uint8_t apic_id, std::uint8_t vector)
 	}
 }
 
-// calibrate the LAPIC timer bus frequency using the HPET
 void APIC::timer_calibrate(void)
 {
 	std::uint64_t hpet_freq = timers::hpet::hpet.get_freq();
@@ -368,7 +327,6 @@ void APIC::timer_calibrate(void)
 #endif
 }
 
-// program the LAPIC timer in one-shot mode
 void APIC::timer_oneshot(std::uint32_t us, std::uint8_t vector)
 {
 	if (this->bus_frequency == 0)
@@ -409,13 +367,11 @@ void APIC::timer_oneshot_periodic_tick(void)
 	this->reg_write(this->REG_TIMER_ICR, this->timer_period_count);
 }
 
-// return the calibrated bus frequency
 std::uint64_t APIC::bus_freq(void)
 {
 	return this->bus_frequency;
 }
 
-// initialize the full interrupt subsystem: PIC, LAPIC, x2APIC, IOAPIC
 void init_all(void)
 {
 	interrupts::pic::disable_pic();
@@ -440,6 +396,6 @@ void enable_x2apic_bsp(void)
 	apic.enable_x2apic();
 }
 
-} // namespace apic
+}
 
-} // namespace interrupts
+}

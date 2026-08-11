@@ -84,4 +84,4 @@ public:
 
 extern SlubAllocator slub;
 
-} // namespace memory
+}

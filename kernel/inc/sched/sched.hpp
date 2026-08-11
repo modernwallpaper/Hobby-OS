@@ -12,7 +12,7 @@
 namespace interrupts::idt
 {
 struct frame;
-} // namespace interrupts::idt
+}
 
 namespace sched
 {
@@ -43,25 +43,14 @@ struct thread {
 	std::uint64_t cpu;
 	std::uint64_t deadline;
 
-	// sleep / wait-queue support. `next` links a thread into a run queue (or
-	// the reaper's graveyard); `wait_next` links a thread into exactly one of
-	// the sleep queue, a mutex wait queue, or a condvar wait queue. A thread
-	// is never a member of more than one wait queue at a time.
+	// `next` is for run/reaper queues; `wait_next` is for one wait queue.
 	std::uint64_t wake_tick;
 	thread* wait_next;
-	// entry point invoked by the thread trampoline after a context switch
 	void (*entry)(void);
-	// whether kernel_stack_base was handed out by create_thread() and must be
-	// returned to the buddy allocator when the thread is reaped
 	bool stack_owned;
 };
 
-// Per-CPU run queue: one set of policy sub-queues per CPU, plus a pointer to
-// that CPU's idle thread. The scheduling fast path only ever touches the
-// current CPU's Runqueue, so it never contends on a global scheduler lock.
-// Each sub-queue keeps its own IrqSpinlock; every queue operation is short
-// and self-contained, so no lock is ever held across a scheduling decision or
-// across the actual context switch.
+// Per-CPU run queue; no global scheduler lock is held across switches.
 class Runqueue {
 private:
 	std::uint64_t cpu;
@@ -78,11 +67,7 @@ public:
 	thread* get_idle(void);
 };
 
-// Per-CPU sleep queue: threads that called sleep() park here, sorted by wake
-// tick. Only the owning CPU's timer tick walks it, so expired threads are
-// re-enqueued onto that same CPU's run queue. wake() from another CPU takes
-// this queue's lock to unlink a thread before enqueueing it, so it never
-// races the tick path.
+// Per-CPU sleep queue, sorted by wake tick.
 class SleepQueue {
 private:
 	sync::IrqSpinlock lock;
@@ -101,9 +86,7 @@ private:
 	Runqueue runqueues[smp::MAX_CPUS];
 	SleepQueue sleep_queues[smp::MAX_CPUS];
 
-	// dead threads awaiting reclamation; drained at the top of schedule().
-	// Pushed only after the scheduler has switched away from a dead thread,
-	// so the stack is no longer in use by the time it is freed.
+	// Freed only after the scheduler has switched away from their stacks.
 	sync::IrqSpinlock graveyard_lock;
 	thread* graveyard;
 
@@ -129,9 +112,7 @@ public:
 
 extern Scheduler scheduler;
 
-// Monotonic tick count, incremented by every CPU's LAPIC timer tick. The
-// per-CPU timers are not phase-locked, so this is a coarse time base used
-// only for scheduling delays.
+// Coarse scheduler time base; per-CPU LAPIC timers are not phase-locked.
 extern std::uint64_t ticks_since_boot;
 
 static inline thread* current_thread(void)
@@ -139,4 +120,4 @@ static inline thread* current_thread(void)
 	return reinterpret_cast<thread*>(smp::this_cpu()->current_thread);
 }
 
-} // namespace sched
+}

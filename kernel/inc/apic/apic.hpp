@@ -134,6 +134,6 @@ extern APIC apic;
 
 void init_all(void);
 
-} // namespace apic
+}
 
-} // namespace interrupts
+}

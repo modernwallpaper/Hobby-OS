@@ -18,10 +18,7 @@ Scheduler scheduler;
 namespace
 {
 
-// Context-switch entry point for freshly created threads. The thread starts
-// executing here (the initial frame's RIP points at this function) with a
-// fresh stack. Once the user entry returns the thread is dead and must be
-// reaped; the scheduler parks it in the graveyard and switches away.
+// Entry point for new threads; returning marks the thread dead for reaping.
 extern "C" void thread_entry_trampoline(void)
 {
 	thread* t = current_thread();
@@ -30,7 +27,7 @@ extern "C" void thread_entry_trampoline(void)
 	scheduler.exit();
 }
 
-} // namespace
+}
 
 void Runqueue::init(std::uint64_t cpu)
 {
@@ -151,10 +148,7 @@ void SleepQueue::wake_expired(std::uint64_t now, Runqueue& rq)
 	std::uint64_t flags;
 	this->lock.lock_save(flags);
 
-	// The queue is sorted by wake tick, so all expired threads are at the
-	// head. Re-enqueue them while still holding the sleep queue lock: it is
-	// the only place that dequeues, and lock order is always sleep queue ->
-	// run queue, so this cannot deadlock against the scheduling fast path.
+	// Expired sleepers are at the head; lock order is sleep queue -> run queue.
 	thread* w = this->head;
 	while (w && w->wake_tick <= now)
 	{
@@ -256,13 +250,7 @@ void Scheduler::reap_graveyard(void)
 	}
 }
 
-// Run one scheduling step. Called only from interrupt context (timer tick or
-// the yield software interrupt), where IF is already cleared. The scheduler
-// owns no lock of its own here: the fast path operates on the current CPU's
-// Runqueue, whose sub-queues each take their own interrupt-safe lock only for
-// the duration of a single enqueue/dequeue. No lock is held across the pick
-// decision or across the context switch, and no global scheduler lock exists
-// to serialize or deadlock on.
+// Interrupt-context scheduling step; no lock is held across the switch.
 interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
 					    bool preempt)
 {
@@ -286,20 +274,13 @@ interrupts::idt::frame* Scheduler::schedule(interrupts::idt::frame* f,
 		requeue = true;
 	}
 
-	// The current thread still has CPU time left, so it keeps the CPU. Do
-	// not switch away, otherwise a thread that is RUNNING but not in any
-	// run queue (e.g. the boot thread before it is enqueued) would be
-	// stranded forever and the machine would fall into the idle loop
-	// mid-boot.
+	// A running thread may not be in any queue yet, so keep it on-CPU.
 	if (!requeue)
 		return f;
 
 	std::uint64_t cpu = smp::this_cpu()->cpu_id;
 
-	// Requeue only threads that are actually runnable. SLEEPING threads
-	// are parked on a wait queue and must not be enqueued; DEAD threads go
-	// to the graveyard to be reaped once we have switched away from their
-	// stack. IDLE threads are not members of any run queue.
+	// Only runnable threads go back into a run queue.
 	if (current->state == TaskState::READY ||
 	    current->state == TaskState::RUNNING)
 	{
@@ -400,8 +381,7 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	std::uint64_t stack_top = reinterpret_cast<std::uint64_t>(stack) + 8192;
 	std::uint64_t* sp = reinterpret_cast<std::uint64_t*>(stack_top);
 
-	// Build an interrupt frame that will start the trampoline via iretq
-	// (see isr_common in idt.asm for the exact layout).
+	// Initial frame layout matches isr_common in idt.asm.
 	*--sp = 0x10;					  // SS
 	*--sp = reinterpret_cast<std::uint64_t>(stack_top); // RSP
 	*--sp = 0x202;					  // RFLAGS
@@ -434,4 +414,4 @@ thread* Scheduler::create_thread(void (*entry)(void), Policy policy,
 	return t;
 }
 
-} // namespace sched
+}

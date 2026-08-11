@@ -266,5 +266,5 @@ void IDT::load(void)
 	asm volatile("lidt %0" : : "m"(this->idt_ptr));
 }
 
-} // namespace idt
-} // namespace interrupts
+}
+}

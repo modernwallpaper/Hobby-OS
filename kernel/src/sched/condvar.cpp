@@ -12,8 +12,7 @@ void CondVar::wait(Mutex& mutex)
 {
 	thread* me = current_thread();
 
-	// Park first, then release the mutex, so the release cannot race a
-	// signal into a lost wakeup.
+	// Park before unlock to avoid lost wakeups.
 	std::uint64_t flags;
 	this->spinlock.lock_save(flags);
 
@@ -85,4 +84,4 @@ void CondVar::broadcast(void)
 	}
 }
 
-} // namespace sched
+}

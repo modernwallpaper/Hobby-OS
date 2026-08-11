@@ -8,7 +8,7 @@ namespace gdt
 {
 struct entry;
 struct tss;
-} // namespace gdt
+}
 
 namespace smp
 {
@@ -47,4 +47,4 @@ static inline cpu_info* this_cpu()
 	return info;
 }
 
-} // namespace smp
+}

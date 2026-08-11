@@ -70,6 +70,6 @@ public:
 
 extern HPET hpet;
 
-} // namespace hpet
+}
 
-} // namespace timers
+}

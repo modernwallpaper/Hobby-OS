@@ -65,4 +65,4 @@ private:
 	bool locked;
 };
 
-} // namespace sync
+}

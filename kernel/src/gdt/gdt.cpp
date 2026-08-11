@@ -80,4 +80,4 @@ void GDT::set_tss_gate(std::uint32_t num, std::uint64_t base,
 	this->tss_high_entry->reserved = 0;
 }
 
-} // namespace gdt
+}

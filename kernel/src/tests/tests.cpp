@@ -317,14 +317,14 @@ SchedulerSleepTest scheduler_sleep_test;
 SchedulerThreadsTest scheduler_threads_test;
 MutexCondvarTest mutex_condvar_test;
 
-} // namespace
+}
 
 Test* all_tests[] = {&memory_functions_test, &buddy_allocator_test,
 		     &slub_allocator_test, &scheduler_queues_test,
 		     &scheduler_sleep_test, &scheduler_threads_test,
 		     &mutex_condvar_test};
 
-} // namespace
+}
 
 void run_all(void)
 {
@@ -350,4 +350,4 @@ void run_all(void)
 	LOG("passed=%llu; failed=%llu", passed, failed);
 }
 
-} // namespace tests
+}

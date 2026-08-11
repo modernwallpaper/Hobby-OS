@@ -8,10 +8,7 @@ namespace sched
 
 struct thread;
 
-// Blocking mutex. lock() parks the caller on the internal wait queue with the
-// thread state set to SLEEPING if the mutex is contended, then yields until a
-// waiter is woken by unlock(). The wait queue is FIFO but not strictly fair:
-// a woken waiter re-races for the lock, so a new arrival can overtake it.
+// Blocking mutex; waiters are FIFO but re-race after wakeup.
 class Mutex {
 public:
 	Mutex();
@@ -27,4 +24,4 @@ private:
 	thread* wait_tail;
 };
 
-} // namespace sched
+}

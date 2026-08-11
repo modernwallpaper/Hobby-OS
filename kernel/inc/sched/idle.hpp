@@ -20,6 +20,6 @@ public:
 	thread* get_idle(std::uint64_t cpu);
 };
 
-} // namespace idle
+}
 
-} // namespace sched
+}

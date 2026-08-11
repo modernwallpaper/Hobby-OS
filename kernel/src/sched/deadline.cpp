@@ -57,6 +57,6 @@ thread* Deadline::pick_next(void)
 	return t;
 }
 
-} // namespace deadline
+}
 
-} // namespace sched
+}

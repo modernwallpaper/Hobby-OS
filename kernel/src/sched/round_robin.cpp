@@ -55,6 +55,6 @@ thread* RoundRobin::pick_next(void)
 	return t;
 }
 
-} // namespace round_robin
+}
 
-} // namespace sched
+}

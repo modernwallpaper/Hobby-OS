@@ -23,6 +23,6 @@ public:
 	thread* pick_next(void);
 };
 
-} // namespace round_robin
+}
 
-} // namespace sched
+}

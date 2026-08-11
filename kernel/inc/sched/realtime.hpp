@@ -23,6 +23,6 @@ public:
 	thread* pick_next(void);
 };
 
-} // namespace realtime
+}
 
-} // namespace sched
+}

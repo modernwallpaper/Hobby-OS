@@ -20,4 +20,4 @@ void cache_flush(void* addr, std::size_t size);
 // invalidate the cache lines covering [addr, addr+size) so the CPU re-reads
 // data written by the device after a device->host transfer completes.
 void cache_invalidate(void* addr, std::size_t size);
-} // namespace dma
+}

@@ -133,4 +133,4 @@ public:
 
 extern ACPI acpi;
 
-} // namespace acpi
+}

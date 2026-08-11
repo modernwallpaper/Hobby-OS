@@ -22,4 +22,4 @@ public:
 
 extern TSC tsc;
 
-} // namespace tsc
+}

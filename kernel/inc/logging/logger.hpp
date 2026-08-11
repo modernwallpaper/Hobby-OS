@@ -32,4 +32,4 @@ void logf(const char* module, const char* func, const char* fmt, ...);
  * @param ...           Args
  */
 void printf(const char* fmt, ...);
-} // namespace logger
+}

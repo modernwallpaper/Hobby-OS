@@ -179,4 +179,4 @@ void logf(const char* module, const char* func, const char* fmt, ...)
 	log_lock.unlock_restore(flags);
 }
 
-} // namespace logger
+}

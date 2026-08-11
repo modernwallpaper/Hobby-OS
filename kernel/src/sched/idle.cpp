@@ -56,9 +56,9 @@ thread* Idle::get_idle(std::uint64_t cpu)
 	return this->idle_threads[cpu];
 }
 
-} // namespace idle
+}
 
-} // namespace sched
+}
 
 extern "C" void idle_loop(void)
 {

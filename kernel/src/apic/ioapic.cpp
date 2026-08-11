@@ -11,7 +11,6 @@ namespace ioapic
 
 IOAPIC ioapic;
 
-// write an IOAPIC register (indexed via regsel/regwin)
 void IOAPIC::write_register(std::uint8_t index, std::uint32_t value)
 {
 	*this->regsel =
@@ -19,7 +18,6 @@ void IOAPIC::write_register(std::uint8_t index, std::uint32_t value)
 	*this->regwin = value;
 }
 
-// read an IOAPIC register (indexed via regsel/regwin)
 std::uint32_t IOAPIC::read_register(std::uint8_t index)
 {
 	*this->regsel =
@@ -27,7 +25,6 @@ std::uint32_t IOAPIC::read_register(std::uint8_t index)
 	return *this->regwin;
 }
 
-// initialize the IOAPIC: map MMIO, mask all redirection entries
 void IOAPIC::init(std::uint32_t base_phys)
 {
 	this->base_phys = base_phys;
@@ -62,13 +59,11 @@ void IOAPIC::init(std::uint32_t base_phys)
 #endif
 }
 
-// number of redirection pins this driver will program
 int IOAPIC::max_pins(void) const
 {
 	return this->MAX_REDIRECTION_ENTRIES;
 }
 
-// mask (disable) a specific IRQ pin
 void IOAPIC::mask_irq(std::uint8_t irq)
 {
 	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
@@ -77,7 +72,6 @@ void IOAPIC::mask_irq(std::uint8_t irq)
 	this->write_register(static_cast<std::uint8_t>(index), low);
 }
 
-// unmask (enable) a specific IRQ pin
 void IOAPIC::unmask_irq(std::uint8_t irq)
 {
 	std::uint16_t index = this->REG_IOREDTBL_BASE + irq * 2;
@@ -86,9 +80,7 @@ void IOAPIC::unmask_irq(std::uint8_t irq)
 	this->write_register(static_cast<std::uint8_t>(index), low);
 }
 
-// route an IRQ pin to a specific APIC and interrupt vector. PCI INTx lines
-// are level-triggered, active-low; legacy (ISA) interrupts are edge-triggered,
-// active-high — pass the matching flags so real hardware delivers correctly.
+// PCI INTx is level/active-low; legacy ISA is edge/active-high.
 void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
 			  std::uint8_t apic_id, bool level_triggered,
 			  bool active_low)
@@ -97,10 +89,8 @@ void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
 
 	std::uint32_t low = vector;
 
-	// bit 13: polarity (0 = active high, 1 = active low)
 	if (active_low)
 		low |= (1 << 13);
-	// bit 15: trigger mode (0 = edge, 1 = level)
 	if (level_triggered)
 		low |= (1 << 15);
 
@@ -115,6 +105,6 @@ void IOAPIC::redirect_irq(std::uint8_t irq, std::uint8_t vector,
 #endif
 }
 
-} // namespace ioapic
+}
 
-} // namespace interrupts
+}

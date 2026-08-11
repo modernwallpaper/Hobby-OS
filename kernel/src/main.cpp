@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <drivers/storage/ahci.hpp>
+#include <drivers/storage/ide.hpp>
 #include <gdt/gdt.hpp>
 #include <hpet/hpet.hpp>
 #include <idt/idt.hpp>
@@ -28,7 +29,7 @@ namespace
 __attribute__((used, section(".limine_requests"))) volatile std::uint64_t
     limine_base_revision[] = LIMINE_BASE_REVISION(6);
 
-} // namespace
+}
 
 namespace
 {
@@ -68,7 +69,7 @@ __attribute__((
 			 .revision = 0,
 			 .response = nullptr};
 
-} // namespace
+}
 
 namespace
 {
@@ -79,7 +80,7 @@ __attribute__((used, section(".limine_requests_start"))) volatile std::uint64_t
 __attribute__((used, section(".limine_requests_end"))) volatile std::uint64_t
     limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
-} // namespace
+}
 
 namespace
 {
@@ -161,7 +162,7 @@ void hcf(void)
 	}
 }
 
-} // namespace
+}
 
 extern "C" {
 int __cxa_atexit(void (*)(void*), void*, void*)
@@ -288,12 +289,17 @@ extern "C" void kmain(void)
 
 	pci::pci.init();
 
-	drivers::storage::ahci::controller.init();
+	drivers::storage::ahci::init_all();
+
+	// no SATA controller: fall back to legacy PIO IDE drives
+	if (block::device_count() == 0)
+		drivers::storage::ide::init();
 
 	// exercise the AHCI MSI/INTx interrupt path: read the boot disks first
 	// sector and check for the MBR signature 0x55 0xAA at bytes 510/511
 	std::uint8_t boot_sector[512];
-	if (drivers::storage::ahci::controller.read_sector(0, 0, boot_sector))
+	if (drivers::storage::ahci::controller.initialized() &&
+	    drivers::storage::ahci::controller.read_sector(0, 0, boot_sector))
 	{
 		LOG("ahci_read_sector_ok; first=0x%02x%02x%02x%02x; "
 		    "mbr_sig=0x%02x%02x",
@@ -327,6 +333,27 @@ extern "C" void kmain(void)
 	else
 	{
 		LOG("ahci_block_device_unavailable");
+	}
+
+	// exercise the ATAPI read path on the optical drive, if a medium is
+	// loaded: read the ISO-9660 volume descriptor at sector 16 and check
+	// for the "CD001" magic
+	drivers::storage::ahci::device_state* cd =
+	    drivers::storage::ahci::controller.initialized()
+		? drivers::storage::ahci::controller.find_device(2)
+		: nullptr;
+	if (cd != nullptr && cd->present && cd->block_count > 0)
+	{
+		std::uint8_t vd[2048];
+		bool ok = drivers::storage::ahci::controller.read(cd, 16, 1, vd);
+		bool iso = ok && vd[1] == 'C' && vd[2] == 'D' && vd[3] == '0' &&
+			   vd[4] == '0' && vd[5] == '1';
+		LOG("ahci_atapi_read_%s; blocks=%llu; iso=%s", ok ? "ok" : "failed",
+		    static_cast<std::uint64_t>(cd->block_count), iso ? "yes" : "no");
+	}
+	else
+	{
+		LOG("ahci_atapi_no_media");
 	}
 
 	// tests
